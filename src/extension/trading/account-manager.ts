@@ -5,8 +5,8 @@
  * like aggregated equity and global contract search.
  */
 
-import type { Contract } from './contract.js'
-import type { ITradingAccount, AccountCapabilities, AccountInfo } from './interfaces.js'
+import type { Contract, ContractDescription, ContractDetails } from './contract.js'
+import type { ITradingAccount, AccountCapabilities } from './interfaces.js'
 
 // ==================== Account entry ====================
 
@@ -41,7 +41,7 @@ export interface AggregatedEquity {
 
 export interface ContractSearchResult {
   accountId: string
-  contracts: Contract[]
+  results: ContractDescription[]
 }
 
 // ==================== AccountManager ====================
@@ -121,11 +121,11 @@ export class AccountManager {
   // ---- Cross-account contract search ----
 
   /**
-   * Search all accounts for matching contracts.
+   * Fuzzy search all accounts for matching contracts (IBKR: reqMatchingSymbols).
    * If accountId is specified, only searches that account.
    */
-  async resolveContract(
-    query: Partial<Contract>,
+  async searchContracts(
+    pattern: string,
     accountId?: string,
   ): Promise<ContractSearchResult[]> {
     const targets = accountId
@@ -134,12 +134,24 @@ export class AccountManager {
 
     const results = await Promise.all(
       targets.map(async ({ account }) => {
-        const contracts = await account.resolveContract(query)
-        return { accountId: account.id, contracts }
+        const descriptions = await account.searchContracts(pattern)
+        return { accountId: account.id, results: descriptions }
       }),
     )
 
-    return results.filter((r) => r.contracts.length > 0)
+    return results.filter((r) => r.results.length > 0)
+  }
+
+  /**
+   * Get full contract details from a specific account (IBKR: reqContractDetails).
+   */
+  async getContractDetails(
+    query: Partial<Contract>,
+    accountId: string,
+  ): Promise<ContractDetails | null> {
+    const entry = this.entries.get(accountId)
+    if (!entry) return null
+    return entry.account.getContractDetails(query)
   }
 
   // ---- Lifecycle ----

@@ -82,48 +82,67 @@ describe('AccountManager', () => {
     })
   })
 
-  // ==================== resolveContract ====================
+  // ==================== searchContracts ====================
 
-  describe('resolveContract', () => {
+  describe('searchContracts', () => {
     it('searches all accounts by default', async () => {
       const a1 = new MockTradingAccount({ id: 'a1' })
-      a1.resolveContract.mockResolvedValue([makeContract({ aliceId: 'a1-AAPL' })])
+      a1.searchContracts.mockResolvedValue([{ contract: makeContract({ aliceId: 'a1-AAPL' }) }])
       const a2 = new MockTradingAccount({ id: 'a2' })
-      a2.resolveContract.mockResolvedValue([makeContract({ aliceId: 'a2-AAPL' })])
+      a2.searchContracts.mockResolvedValue([{ contract: makeContract({ aliceId: 'a2-AAPL' }) }])
 
       manager.addAccount(a1)
       manager.addAccount(a2)
 
-      const results = await manager.resolveContract({ symbol: 'AAPL' })
+      const results = await manager.searchContracts('AAPL')
       expect(results).toHaveLength(2)
     })
 
     it('scopes search to specific accountId', async () => {
       const a1 = new MockTradingAccount({ id: 'a1' })
-      a1.resolveContract.mockResolvedValue([makeContract({ aliceId: 'a1-AAPL' })])
+      a1.searchContracts.mockResolvedValue([{ contract: makeContract({ aliceId: 'a1-AAPL' }) }])
       const a2 = new MockTradingAccount({ id: 'a2' })
-      a2.resolveContract.mockResolvedValue([makeContract({ aliceId: 'a2-AAPL' })])
+      a2.searchContracts.mockResolvedValue([{ contract: makeContract({ aliceId: 'a2-AAPL' }) }])
 
       manager.addAccount(a1)
       manager.addAccount(a2)
 
-      const results = await manager.resolveContract({ symbol: 'AAPL' }, 'a1')
+      const results = await manager.searchContracts('AAPL', 'a1')
       expect(results).toHaveLength(1)
       expect(results[0].accountId).toBe('a1')
     })
 
     it('excludes accounts with no matches', async () => {
       const a1 = new MockTradingAccount({ id: 'a1' })
-      a1.resolveContract.mockResolvedValue([])
+      a1.searchContracts.mockResolvedValue([])
       const a2 = new MockTradingAccount({ id: 'a2' })
-      a2.resolveContract.mockResolvedValue([makeContract()])
+      a2.searchContracts.mockResolvedValue([{ contract: makeContract() }])
 
       manager.addAccount(a1)
       manager.addAccount(a2)
 
-      const results = await manager.resolveContract({ symbol: 'AAPL' })
+      const results = await manager.searchContracts('AAPL')
       expect(results).toHaveLength(1)
       expect(results[0].accountId).toBe('a2')
+    })
+  })
+
+  // ==================== getContractDetails ====================
+
+  describe('getContractDetails', () => {
+    it('returns details from specified account', async () => {
+      const a1 = new MockTradingAccount({ id: 'a1' })
+      manager.addAccount(a1)
+
+      const details = await manager.getContractDetails({ symbol: 'AAPL' }, 'a1')
+      expect(details).not.toBeNull()
+      expect(details!.contract.symbol).toBe('AAPL')
+      expect(details!.longName).toBe('Apple Inc.')
+    })
+
+    it('returns null for unknown account', async () => {
+      const details = await manager.getContractDetails({ symbol: 'AAPL' }, 'nope')
+      expect(details).toBeNull()
     })
   })
 

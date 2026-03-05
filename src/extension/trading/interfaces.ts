@@ -6,7 +6,7 @@
  * All providers (Alpaca, CCXT, IBKR, ...) implement ITradingAccount.
  */
 
-import type { Contract, SecType } from './contract.js'
+import type { Contract, SecType, ContractDescription, ContractDetails } from './contract.js'
 
 // ==================== Position ====================
 
@@ -171,9 +171,10 @@ export interface ITradingAccount {
   init(): Promise<void>
   close(): Promise<void>
 
-  // ---- Contract resolution ----
+  // ---- Contract search (IBKR: reqMatchingSymbols + reqContractDetails) ----
 
-  resolveContract(query: Partial<Contract>): Promise<Contract[]>
+  searchContracts(pattern: string): Promise<ContractDescription[]>
+  getContractDetails(query: Partial<Contract>): Promise<ContractDetails | null>
 
   // ---- Trading operations ----
 

@@ -7,7 +7,7 @@
  */
 
 import Alpaca from '@alpacahq/alpaca-trade-api'
-import type { Contract } from '../../contract.js'
+import type { Contract, ContractDescription, ContractDetails } from '../../contract.js'
 import type {
   ITradingAccount,
   AccountCapabilities,
@@ -118,24 +118,26 @@ export class AlpacaAccount implements ITradingAccount {
     // Alpaca SDK has no explicit close
   }
 
-  // ---- Contract resolution ----
+  // ---- Contract search (IBKR: reqMatchingSymbols + reqContractDetails) ----
 
-  async resolveContract(query: Partial<Contract>): Promise<Contract[]> {
-    // If aliceId is provided, parse it directly
-    if (query.aliceId) {
-      const nativeId = this.parseAliceId(query.aliceId)
-      if (!nativeId) return []
-      return [this.makeContract(nativeId)]
+  async searchContracts(pattern: string): Promise<ContractDescription[]> {
+    if (!pattern) return []
+
+    // Alpaca tickers are unique for stocks — pattern is treated as exact ticker match
+    const ticker = pattern.toUpperCase()
+    return [{ contract: this.makeContract(ticker) }]
+  }
+
+  async getContractDetails(query: Partial<Contract>): Promise<ContractDetails | null> {
+    const symbol = this.resolveSymbol(query as Contract)
+    if (!symbol) return null
+
+    return {
+      contract: this.makeContract(symbol),
+      validExchanges: ['SMART', 'NYSE', 'NASDAQ', 'ARCA'],
+      orderTypes: ['market', 'limit', 'stop', 'stop_limit', 'trailing_stop'],
+      stockType: 'COMMON',
     }
-
-    if (!query.symbol) return []
-
-    // For now Alpaca only supports STK — if secType is specified and not STK, no match
-    if (query.secType && query.secType !== 'STK') return []
-
-    // Alpaca tickers are unique for stocks — symbol alone is sufficient
-    // In the future when options are added, we'd filter by secType/strike/right/etc.
-    return [this.makeContract(query.symbol.toUpperCase())]
   }
 
   // ---- Trading operations ----

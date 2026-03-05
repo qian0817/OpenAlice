@@ -113,3 +113,35 @@ export interface Contract {
   /** Delta-neutral combo order parameters. */
   deltaNeutralContract?: DeltaNeutralContract
 }
+
+// ==================== Contract Description (IBKR: reqMatchingSymbols result) ====================
+
+/** Lightweight search result from searchContracts — matches IBKR ContractDescription. */
+export interface ContractDescription {
+  contract: Contract
+  /** Derivative security types available for this underlying (e.g. OPT, FUT). */
+  derivativeSecTypes?: SecType[]
+}
+
+// ==================== Contract Details (IBKR: reqContractDetails result) ====================
+
+/** Full contract specification from getContractDetails — matches IBKR ContractDetails. */
+export interface ContractDetails {
+  contract: Contract
+  longName?: string               // "Apple Inc.", "Bitcoin Perpetual"
+  industry?: string               // "Technology"
+  category?: string               // "Computers"
+  subcategory?: string            // "Consumer Electronics"
+  marketName?: string             // "NMS", "ISLAND"
+  minTick?: number                // minimum price increment
+  priceMagnifier?: number         // price display factor
+  orderTypes?: string[]           // supported order types for this contract
+  validExchanges?: string[]       // exchanges where this can be traded
+  tradingHours?: string           // trading hours description
+  liquidHours?: string            // liquid trading hours
+  timeZone?: string               // timezone ID
+  stockType?: string              // "COMMON", "ETF", "ADR"
+  contractMonth?: string          // for futures/options: "202506"
+  underlyingSymbol?: string       // for derivatives: underlying symbol
+  underlyingSecType?: SecType     // for derivatives: underlying type
+}

@@ -5,7 +5,7 @@
  */
 
 import { vi } from 'vitest'
-import type { Contract } from '../contract.js'
+import type { Contract, ContractDescription, ContractDetails } from '../contract.js'
 import type {
   ITradingAccount,
   AccountCapabilities,
@@ -115,8 +115,11 @@ export class MockTradingAccount implements ITradingAccount {
   init = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
   close = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
 
-  resolveContract = vi.fn<(query: Partial<Contract>) => Promise<Contract[]>>()
-    .mockResolvedValue([makeContract()])
+  searchContracts = vi.fn<(pattern: string) => Promise<ContractDescription[]>>()
+    .mockResolvedValue([{ contract: makeContract() }])
+
+  getContractDetails = vi.fn<(query: Partial<Contract>) => Promise<ContractDetails | null>>()
+    .mockResolvedValue({ contract: makeContract(), longName: 'Apple Inc.' })
 
   placeOrder = vi.fn<(order: OrderRequest) => Promise<OrderResult>>()
     .mockResolvedValue(makeOrderResult())

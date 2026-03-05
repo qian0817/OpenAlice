@@ -101,6 +101,77 @@ export function createTradingTools(resolver: AccountResolver) {
       },
     }),
 
+    // ==================== Contract Search (IBKR: reqMatchingSymbols) ====================
+
+    searchContracts: tool({
+      description: `Search for tradeable symbols across accounts.
+
+Returns matching contracts with source attribution so you know which account can trade each symbol.
+Use this BEFORE placing orders to discover what's available and where.
+
+Examples:
+- searchContracts({ pattern: "AAPL" }) → finds AAPL on equity accounts
+- searchContracts({ pattern: "BTC" }) → finds BTC markets on crypto accounts`,
+      inputSchema: z.object({
+        pattern: z.string().describe('Symbol or keyword to search (e.g. "AAPL", "BTC", "TSLA")'),
+        source: z.string().optional().describe(sourceDesc(false)),
+      }),
+      execute: async ({ pattern, source }) => {
+        const targets = resolveAccounts(accountManager, source)
+        if (targets.length === 0) return { error: 'No accounts available.' }
+
+        const allResults: Array<Record<string, unknown>> = []
+
+        for (const { account, id } of targets) {
+          try {
+            const descriptions = await account.searchContracts(pattern)
+            for (const desc of descriptions) {
+              allResults.push({
+                source: id,
+                ...desc,
+              })
+            }
+          } catch {
+            // Skip accounts that fail to search
+          }
+        }
+
+        if (allResults.length === 0) return { results: [], message: `No contracts found matching "${pattern}".` }
+        return allResults
+      },
+    }),
+
+    // ==================== Contract Details (IBKR: reqContractDetails) ====================
+
+    getContractDetails: tool({
+      description: `Get full contract specification for a specific instrument.
+
+Returns detailed information including trading hours, supported order types,
+valid exchanges, price increments, and more.
+
+Use this after searchContracts to get detailed specs for a specific contract.`,
+      inputSchema: z.object({
+        source: z.string().describe(sourceDesc(true)),
+        symbol: z.string().optional().describe('Symbol to look up (e.g. "AAPL", "BTC")'),
+        aliceId: z.string().optional().describe('Alice contract ID for exact match'),
+        secType: z.string().optional().describe('Security type filter (e.g. "STK", "CRYPTO")'),
+        currency: z.string().optional().describe('Currency filter (e.g. "USD", "USDT")'),
+      }),
+      execute: async ({ source, symbol, aliceId, secType, currency }) => {
+        const { account, id } = resolveOne(accountManager, source)
+
+        const query: Record<string, unknown> = {}
+        if (symbol) query.symbol = symbol
+        if (aliceId) query.aliceId = aliceId
+        if (secType) query.secType = secType
+        if (currency) query.currency = currency
+
+        const details = await account.getContractDetails(query)
+        if (!details) return { error: `No contract details found.` }
+        return { source: id, ...details }
+      },
+    }),
+
     // ==================== Account info (query, aggregatable) ====================
 
     getAccount: tool({

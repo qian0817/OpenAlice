@@ -8,7 +8,7 @@
 
 import ccxt from 'ccxt'
 import type { Exchange, Order as CcxtOrder } from 'ccxt'
-import type { Contract } from '../../contract.js'
+import type { Contract, ContractDescription, ContractDetails, SecType } from '../../contract.js'
 import type {
   ITradingAccount,
   AccountCapabilities,
@@ -138,47 +138,24 @@ export class CcxtAccount implements ITradingAccount {
     // CCXT exchanges typically don't need explicit closing
   }
 
-  // ---- Contract resolution ----
+  // ---- Contract search (IBKR: reqMatchingSymbols + reqContractDetails) ----
 
-  async resolveContract(query: Partial<Contract>): Promise<Contract[]> {
+  async searchContracts(pattern: string): Promise<ContractDescription[]> {
     this.ensureInit()
+    if (!pattern) return []
 
-    // Direct aliceId lookup
-    if (query.aliceId) {
-      const ccxtSymbol = this.aliceIdToCcxt(query.aliceId)
-      if (!ccxtSymbol) return []
-      const market = this.exchange.markets[ccxtSymbol]
-      if (!market) return []
-      return [this.marketToContract(market as unknown as CcxtMarket)]
-    }
-
-    if (!query.symbol) return []
-
-    const searchBase = query.symbol.toUpperCase()
-    const results: Contract[] = []
+    const searchBase = pattern.toUpperCase()
+    const matchedMarkets: CcxtMarket[] = []
 
     for (const market of Object.values(this.exchange.markets) as unknown as CcxtMarket[]) {
       if (market.active === false) continue
-
-      // Match by base asset
       if (market.base.toUpperCase() !== searchBase) continue
 
-      // Filter by secType if specified
-      if (query.secType) {
-        const marketSecType = this.ccxtTypeToSecType(market.type)
-        if (marketSecType !== query.secType) continue
-      }
+      // Default filter: only USDT/USD/USDC quoted markets (skip exotic pairs)
+      const quote = market.quote.toUpperCase()
+      if (quote !== 'USDT' && quote !== 'USD' && quote !== 'USDC') continue
 
-      // Filter by currency if specified
-      if (query.currency && market.quote.toUpperCase() !== query.currency.toUpperCase()) continue
-
-      // Default filter: only USDT/USD quoted markets (skip exotic pairs)
-      if (!query.currency) {
-        const quote = market.quote.toUpperCase()
-        if (quote !== 'USDT' && quote !== 'USD' && quote !== 'USDC') continue
-      }
-
-      results.push(this.marketToContract(market))
+      matchedMarkets.push(market)
     }
 
     // Sort: preferred market type first, then USDT > USD > USDC
@@ -187,16 +164,45 @@ export class CcxtAccount implements ITradingAccount {
       : { spot: 0, swap: 1, future: 2, option: 3 }
     const quoteOrder: Record<string, number> = { USDT: 0, USD: 1, USDC: 2 }
 
-    results.sort((a, b) => {
-      const aType = typeOrder[this.secTypeToCcxtType(a.secType) as keyof typeof typeOrder] ?? 99
-      const bType = typeOrder[this.secTypeToCcxtType(b.secType) as keyof typeof typeOrder] ?? 99
+    matchedMarkets.sort((a, b) => {
+      const aType = typeOrder[a.type as keyof typeof typeOrder] ?? 99
+      const bType = typeOrder[b.type as keyof typeof typeOrder] ?? 99
       if (aType !== bType) return aType - bType
-      const aQuote = quoteOrder[a.currency?.toUpperCase() ?? ''] ?? 99
-      const bQuote = quoteOrder[b.currency?.toUpperCase() ?? ''] ?? 99
+      const aQuote = quoteOrder[a.quote.toUpperCase()] ?? 99
+      const bQuote = quoteOrder[b.quote.toUpperCase()] ?? 99
       return aQuote - bQuote
     })
 
-    return results
+    // Collect derivative types available for this base asset
+    const derivativeTypes = new Set<SecType>()
+    for (const m of matchedMarkets) {
+      if (m.type === 'future') derivativeTypes.add('FUT')
+      if (m.type === 'option') derivativeTypes.add('OPT')
+    }
+    const derivativeSecTypes: SecType[] | undefined = derivativeTypes.size > 0
+      ? Array.from(derivativeTypes)
+      : undefined
+
+    return matchedMarkets.map(market => ({
+      contract: this.marketToContract(market),
+      derivativeSecTypes,
+    }))
+  }
+
+  async getContractDetails(query: Partial<Contract>): Promise<ContractDetails | null> {
+    this.ensureInit()
+
+    const ccxtSymbol = this.contractToCcxt(query as Contract)
+    if (!ccxtSymbol) return null
+
+    const market = this.exchange.markets[ccxtSymbol] as unknown as CcxtMarket | undefined
+    if (!market) return null
+
+    return {
+      contract: this.marketToContract(market),
+      longName: `${market.base}/${market.quote} ${market.type}${market.settle ? ` (${market.settle} settled)` : ''}`,
+      minTick: market.precision?.price,
+    }
   }
 
   // ---- Trading operations ----
@@ -709,15 +715,6 @@ Use this to evaluate liquidity and potential slippage before placing large order
       case 'future': return 'FUT'
       case 'option': return 'OPT'
       default: return 'CRYPTO'
-    }
-  }
-
-  private secTypeToCcxtType(secType: Contract['secType']): string {
-    switch (secType) {
-      case 'CRYPTO': return this.defaultMarketType
-      case 'FUT': return 'future'
-      case 'OPT': return 'option'
-      default: return 'spot'
     }
   }
 
