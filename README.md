@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://deepwiki.com/TraderAlice/OpenAlice"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a> · <a href="https://traderalice.com"><img src="https://img.shields.io/badge/Website-Visit-blue" alt="traderalice.com"></a>
+  <a href="https://github.com/TraderAlice/OpenAlice/actions/workflows/ci.yml"><img src="https://github.com/TraderAlice/OpenAlice/actions/workflows/ci.yml/badge.svg" alt="CI"></a> · <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="License: AGPL-3.0"></a> · <a href="https://deepwiki.com/TraderAlice/OpenAlice"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a> · <a href="https://traderalice.com"><img src="https://img.shields.io/badge/Website-Visit-blue" alt="traderalice.com"></a>
 </p>
 
 # Open Alice
@@ -254,7 +254,3 @@ docs/                        # Architecture documentation
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=TraderAlice/OpenAlice&type=Date)](https://star-history.com/#TraderAlice/OpenAlice&Date)
-
-## License
-
-[AGPL-3.0](LICENSE)
