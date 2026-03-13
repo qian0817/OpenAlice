@@ -12,6 +12,11 @@ type DisplayItem =
   | { kind: 'text'; role: 'user' | 'assistant' | 'notification'; text: string; timestamp?: string | null; media?: Array<{ type: string; url: string }>; _id: number }
   | { kind: 'tool_calls'; calls: ToolCall[]; timestamp?: string; _id: number }
 
+/** Interleaved streaming segment — preserves text/tool arrival order. */
+type StreamSegment =
+  | { kind: 'text'; text: string }
+  | { kind: 'tools'; tools: StreamingToolCall[] }
+
 interface ChatPageProps {
   onSSEStatus?: (connected: boolean) => void
 }
@@ -23,8 +28,7 @@ export function ChatPage({ onSSEStatus }: ChatPageProps) {
   const [isWaiting, setIsWaiting] = useState(false)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [newMsgCount, setNewMsgCount] = useState(0)
-  const [streamText, setStreamText] = useState('')
-  const [streamTools, setStreamTools] = useState<StreamingToolCall[]>([])
+  const [streamSegments, setStreamSegments] = useState<StreamSegment[]>([])
   const abortRef = useRef<AbortController | null>(null)
 
   // Popover state
@@ -68,7 +72,7 @@ export function ChatPage({ onSSEStatus }: ChatPageProps) {
     }
   }, [])
 
-  useEffect(scrollToBottom, [messages, isWaiting, streamText, streamTools, scrollToBottom])
+  useEffect(scrollToBottom, [messages, isWaiting, streamSegments, scrollToBottom])
 
   // Detect user scroll
   useEffect(() => {
@@ -131,8 +135,7 @@ export function ChatPage({ onSSEStatus }: ChatPageProps) {
 
   // Send message — streams events directly from POST response (no SSE dependency)
   const handleSend = useCallback(async (text: string) => {
-    setStreamText('')
-    setStreamTools([])
+    setStreamSegments([])
     setMessages((prev) => [...prev, { kind: 'text', role: 'user', text, _id: nextId.current++ }])
     setIsWaiting(true)
 
@@ -143,22 +146,35 @@ export function ChatPage({ onSSEStatus }: ChatPageProps) {
       const channel = activeChannelRef.current === 'default' ? undefined : activeChannelRef.current
       let finalText = ''
       let finalMedia: Array<{ type: string; url: string }> | undefined
-      const tools: StreamingToolCall[] = []
-      let streamedText = ''
+      const segments: StreamSegment[] = []
 
       for await (const event of chatApi.sendStreaming(text, channel, abort.signal)) {
         if (event.type === 'stream') {
           const ev = event.event
           if (ev.type === 'tool_use') {
-            tools.push({ id: ev.id, name: ev.name, input: ev.input, status: 'running' })
-            setStreamTools([...tools])
+            const last = segments[segments.length - 1]
+            if (last?.kind === 'tools') {
+              last.tools.push({ id: ev.id, name: ev.name, input: ev.input, status: 'running' })
+            } else {
+              segments.push({ kind: 'tools', tools: [{ id: ev.id, name: ev.name, input: ev.input, status: 'running' }] })
+            }
+            setStreamSegments([...segments])
           } else if (ev.type === 'tool_result') {
-            const t = tools.find((tool) => tool.id === ev.tool_use_id)
-            if (t) { t.status = 'done'; t.result = ev.content }
-            setStreamTools([...tools])
+            for (const seg of segments) {
+              if (seg.kind === 'tools') {
+                const t = seg.tools.find((tool) => tool.id === ev.tool_use_id)
+                if (t) { t.status = 'done'; t.result = ev.content; break }
+              }
+            }
+            setStreamSegments([...segments])
           } else if (ev.type === 'text') {
-            streamedText += ev.text
-            setStreamText(streamedText)
+            const last = segments[segments.length - 1]
+            if (last?.kind === 'text') {
+              last.text += ev.text
+            } else {
+              segments.push({ kind: 'text', text: ev.text })
+            }
+            setStreamSegments([...segments])
           }
         } else if (event.type === 'done') {
           finalText = event.text
@@ -167,16 +183,17 @@ export function ChatPage({ onSSEStatus }: ChatPageProps) {
       }
 
       // Stream complete — finalize messages
-      setStreamText('')
-      setStreamTools([])
+      setStreamSegments([])
 
       if (finalText) {
+        // Collect all tools across segments for the final tool_calls display item
+        const allTools = segments.flatMap((s) => s.kind === 'tools' ? s.tools : [])
         setMessages((prev) => {
           const next = [...prev]
-          if (tools.length > 0) {
+          if (allTools.length > 0) {
             next.push({
               kind: 'tool_calls',
-              calls: tools.map((t) => ({
+              calls: allTools.map((t) => ({
                 name: t.name,
                 input: typeof t.input === 'string' ? t.input : JSON.stringify(t.input ?? ''),
                 result: t.result,
@@ -193,8 +210,7 @@ export function ChatPage({ onSSEStatus }: ChatPageProps) {
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
-      setStreamText('')
-      setStreamTools([])
+      setStreamSegments([])
       const msg = err instanceof Error ? err.message : 'Unknown error'
       setMessages((prev) => [
         ...prev,
@@ -444,7 +460,7 @@ export function ChatPage({ onSSEStatus }: ChatPageProps) {
           })}
           {isWaiting && (
             <div className={`${messages.length > 0 ? 'mt-5' : ''}`}>
-              {streamTools.length > 0 || streamText ? (
+              {streamSegments.length > 0 ? (
                 <>
                   <div className="flex items-center gap-2 mb-1.5">
                     <div className="w-6 h-6 rounded-full bg-accent/15 flex items-center justify-center text-accent shrink-0">
@@ -454,21 +470,33 @@ export function ChatPage({ onSSEStatus }: ChatPageProps) {
                     </div>
                     <span className="text-[12px] text-text-muted font-medium">Alice</span>
                   </div>
-                  {streamTools.length > 0 && <StreamingToolGroup tools={streamTools} />}
-                  {streamText ? (
-                    <div className="mt-1">
-                      <ChatMessage role="assistant" text={streamText} isGrouped />
-                    </div>
-                  ) : streamTools.length > 0 && streamTools.every((t) => t.status === 'done') ? (
-                    /* All tools finished but text hasn't arrived yet — show thinking dots */
-                    <div className="text-text-muted ml-8 mt-1">
-                      <div className="flex">
-                        <span className="thinking-dot">.</span>
-                        <span className="thinking-dot">.</span>
-                        <span className="thinking-dot">.</span>
+                  {streamSegments.map((seg, i) =>
+                    seg.kind === 'tools' ? (
+                      <div key={i} className={i > 0 ? 'mt-1' : ''}>
+                        <StreamingToolGroup tools={seg.tools} />
                       </div>
-                    </div>
-                  ) : null}
+                    ) : (
+                      <div key={i} className={i > 0 ? 'mt-1' : ''}>
+                        <ChatMessage role="assistant" text={seg.text} isGrouped />
+                      </div>
+                    ),
+                  )}
+                  {/* Show thinking dots when last segment is tools with all done, or tools still running */}
+                  {(() => {
+                    const last = streamSegments[streamSegments.length - 1]
+                    if (last?.kind === 'tools' && last.tools.every((t) => t.status === 'done')) {
+                      return (
+                        <div className="text-text-muted ml-8 mt-1">
+                          <div className="flex">
+                            <span className="thinking-dot">.</span>
+                            <span className="thinking-dot">.</span>
+                            <span className="thinking-dot">.</span>
+                          </div>
+                        </div>
+                      )
+                    }
+                    return null
+                  })()}
                 </>
               ) : (
                 <ThinkingIndicator />
