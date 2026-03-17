@@ -7,34 +7,33 @@ import { McpPlugin } from './server/mcp.js'
 import { TelegramPlugin } from './connectors/telegram/index.js'
 import { WebPlugin } from './connectors/web/index.js'
 import { McpAskPlugin } from './connectors/mcp-ask/index.js'
-import { createThinkingTools } from './extension/thinking-kit/index.js'
+import { createThinkingTools } from './tool/thinking.js'
 import {
   AccountManager,
   UnifiedTradingAccount,
   CcxtBroker,
   createCcxtProviderTools,
-  createTradingTools,
   createPlatformFromConfig,
   createBrokerFromConfig,
   validatePlatformRefs,
-} from './extension/trading/index.js'
-import type { GitExportState, IPlatform } from './extension/trading/index.js'
-import { Brain, createBrainTools } from './extension/brain/index.js'
-import type { BrainExportState } from './extension/brain/index.js'
-import { createBrowserTools } from './extension/browser/index.js'
-import { SymbolIndex } from './openbb/equity/index.js'
-import { createEquityTools } from './extension/equity/index.js'
-import { getSDKExecutor, buildRouteMap, SDKEquityClient, SDKCryptoClient, SDKCurrencyClient, SDKNewsClient } from './openbb/sdk/index.js'
-import type { EquityClientLike, CryptoClientLike, CurrencyClientLike, NewsClientLike } from './openbb/sdk/types.js'
-import { buildSDKCredentials } from './openbb/credential-map.js'
-import { OpenBBEquityClient } from './openbb/equity/client.js'
-import { OpenBBCryptoClient } from './openbb/crypto/client.js'
-import { OpenBBCurrencyClient } from './openbb/currency/client.js'
-import { OpenBBNewsClient } from './openbb/news/client.js'
+} from './domain/trading/index.js'
+import { createTradingTools } from './tool/trading.js'
+import type { GitExportState, IPlatform } from './domain/trading/index.js'
+import { Brain } from './domain/brain/index.js'
+import { createBrainTools } from './tool/brain.js'
+import type { BrainExportState } from './domain/brain/index.js'
+import { createBrowserTools } from './tool/browser.js'
+import { SymbolIndex } from './domain/market-data/equity/index.js'
+import { createEquityTools } from './tool/equity.js'
+import { getSDKExecutor, buildRouteMap, SDKEquityClient, SDKCryptoClient, SDKCurrencyClient } from './domain/market-data/client/typebb/index.js'
+import type { EquityClientLike, CryptoClientLike, CurrencyClientLike } from './domain/market-data/client/types.js'
+import { buildSDKCredentials } from './domain/market-data/credential-map.js'
+import { OpenBBEquityClient } from './domain/market-data/client/openbb-api/equity-client.js'
+import { OpenBBCryptoClient } from './domain/market-data/client/openbb-api/crypto-client.js'
+import { OpenBBCurrencyClient } from './domain/market-data/client/openbb-api/currency-client.js'
 import { OpenBBServerPlugin } from './server/opentypebb.js'
-import { createMarketSearchTools } from './extension/market/index.js'
-import { createNewsTools } from './extension/news/index.js'
-import { createAnalysisTools } from './extension/analysis-kit/index.js'
+import { createMarketSearchTools } from './tool/market.js'
+import { createAnalysisTools } from './tool/analysis.js'
 import { SessionStore } from './core/session.js'
 import { ConnectorCenter } from './core/connector-center.js'
 import { ToolCenter } from './core/tool-center.js'
@@ -44,9 +43,11 @@ import { VercelAIProvider } from './ai-providers/vercel-ai-sdk/vercel-provider.j
 import { ClaudeCodeProvider } from './ai-providers/claude-code/claude-code-provider.js'
 import { AgentSdkProvider } from './ai-providers/agent-sdk/agent-sdk-provider.js'
 import { createEventLog } from './core/event-log.js'
+import { createToolCallLog } from './core/tool-call-log.js'
 import { createCronEngine, createCronListener, createCronTools } from './task/cron/index.js'
 import { createHeartbeat } from './task/heartbeat/index.js'
-import { NewsCollectorStore, NewsCollector, wrapNewsToolsForPiggyback, createNewsArchiveTools } from './extension/news-collector/index.js'
+import { NewsCollectorStore, NewsCollector } from './domain/news/index.js'
+import { createNewsArchiveTools } from './tool/news.js'
 
 // ==================== Persistence paths ====================
 
@@ -207,6 +208,7 @@ async function main() {
   // ==================== Event Log ====================
 
   const eventLog = await createEventLog()
+  const toolCallLog = await createToolCallLog()
 
   // ==================== Cron ====================
 
@@ -215,35 +217,32 @@ async function main() {
   // ==================== News Collector Store ====================
 
   const newsStore = new NewsCollectorStore({
-    maxInMemory: config.newsCollector.maxInMemory,
-    retentionDays: config.newsCollector.retentionDays,
+    maxInMemory: config.news.maxInMemory,
+    retentionDays: config.news.retentionDays,
   })
   await newsStore.init()
 
   // ==================== OpenBB Clients ====================
 
-  const { providers } = config.openbb
+  const { providers } = config.marketData
 
   let equityClient: EquityClientLike
   let cryptoClient: CryptoClientLike
   let currencyClient: CurrencyClientLike
-  let newsClient: NewsClientLike
 
-  if (config.openbb.dataBackend === 'openbb') {
-    const url = config.openbb.apiUrl
-    const keys = config.openbb.providerKeys
+  if (config.marketData.backend === 'openbb-api') {
+    const url = config.marketData.apiUrl
+    const keys = config.marketData.providerKeys
     equityClient = new OpenBBEquityClient(url, providers.equity, keys)
     cryptoClient = new OpenBBCryptoClient(url, providers.crypto, keys)
     currencyClient = new OpenBBCurrencyClient(url, providers.currency, keys)
-    newsClient = new OpenBBNewsClient(url, undefined, keys)
   } else {
     const executor = getSDKExecutor()
     const routeMap = buildRouteMap()
-    const credentials = buildSDKCredentials(config.openbb.providerKeys)
+    const credentials = buildSDKCredentials(config.marketData.providerKeys)
     equityClient = new SDKEquityClient(executor, 'equity', providers.equity, credentials, routeMap)
     cryptoClient = new SDKCryptoClient(executor, 'crypto', providers.crypto, credentials, routeMap)
     currencyClient = new SDKCurrencyClient(executor, 'currency', providers.currency, credentials, routeMap)
-    newsClient = new SDKNewsClient(executor, 'news', undefined, credentials, routeMap)
   }
 
   // OpenBB API server is started later via optionalPlugins
@@ -269,15 +268,8 @@ async function main() {
   toolCenter.register(createCronTools(cronEngine), 'cron')
   toolCenter.register(createMarketSearchTools(symbolIndex, cryptoClient, currencyClient), 'market-search')
   toolCenter.register(createEquityTools(equityClient), 'equity')
-  let newsTools = createNewsTools(newsClient, {
-    companyProvider: providers.newsCompany,
-  })
-  if (config.newsCollector.piggybackOpenBB) {
-    newsTools = wrapNewsToolsForPiggyback(newsTools, newsStore)
-  }
-  toolCenter.register(newsTools, 'news')
-  if (config.newsCollector.enabled) {
-    toolCenter.register(createNewsArchiveTools(newsStore), 'news-archive')
+  if (config.news.enabled) {
+    toolCenter.register(createNewsArchiveTools(newsStore), 'news')
   }
   toolCenter.register(createAnalysisTools(equityClient, cryptoClient, currencyClient), 'analysis')
 
@@ -300,6 +292,7 @@ async function main() {
   const agentCenter = new AgentCenter({
     router,
     compaction: config.compaction,
+    toolCallLog,
   })
 
   // ==================== Connector Center ====================
@@ -329,14 +322,14 @@ async function main() {
   // ==================== News Collector ====================
 
   let newsCollector: NewsCollector | null = null
-  if (config.newsCollector.enabled && config.newsCollector.feeds.length > 0) {
+  if (config.news.enabled && config.news.feeds.length > 0) {
     newsCollector = new NewsCollector({
       store: newsStore,
-      feeds: config.newsCollector.feeds,
-      intervalMs: config.newsCollector.intervalMinutes * 60 * 1000,
+      feeds: config.news.feeds,
+      intervalMs: config.news.intervalMinutes * 60 * 1000,
     })
     newsCollector.start()
-    console.log(`news-collector: started (${config.newsCollector.feeds.length} feeds, every ${config.newsCollector.intervalMinutes}m)`)
+    console.log(`news-collector: started (${config.news.feeds.length} feeds, every ${config.news.intervalMinutes}m)`)
   }
 
   // ==================== Account Reconnect ====================
@@ -430,8 +423,8 @@ async function main() {
     }))
   }
 
-  if (config.openbb.apiServer.enabled) {
-    optionalPlugins.set('openbb-server', new OpenBBServerPlugin({ port: config.openbb.apiServer.port }))
+  if (config.marketData.apiServer.enabled) {
+    optionalPlugins.set('openbb-server', new OpenBBServerPlugin({ port: config.marketData.apiServer.port }))
   }
 
   // ==================== Connector Reconnect ====================
@@ -476,26 +469,26 @@ async function main() {
       }
 
       // --- OpenBB API Server ---
-      const openbbWanted = fresh.openbb.apiServer.enabled
+      const openbbWanted = fresh.marketData.apiServer.enabled
       const openbbRunning = optionalPlugins.has('openbb-server')
       if (openbbRunning && !openbbWanted) {
         await optionalPlugins.get('openbb-server')!.stop()
         optionalPlugins.delete('openbb-server')
         changes.push('openbb-server stopped')
       } else if (!openbbRunning && openbbWanted) {
-        const p = new OpenBBServerPlugin({ port: fresh.openbb.apiServer.port })
+        const p = new OpenBBServerPlugin({ port: fresh.marketData.apiServer.port })
         await p.start(ctx)
         optionalPlugins.set('openbb-server', p)
         changes.push('openbb-server started')
       } else if (openbbRunning && openbbWanted) {
         const current = optionalPlugins.get('openbb-server') as OpenBBServerPlugin
-        if (current.port !== fresh.openbb.apiServer.port) {
+        if (current.port !== fresh.marketData.apiServer.port) {
           await current.stop()
           optionalPlugins.delete('openbb-server')
-          const p = new OpenBBServerPlugin({ port: fresh.openbb.apiServer.port })
+          const p = new OpenBBServerPlugin({ port: fresh.marketData.apiServer.port })
           await p.start(ctx)
           optionalPlugins.set('openbb-server', p)
-          changes.push(`openbb-server restarted on port ${fresh.openbb.apiServer.port}`)
+          changes.push(`openbb-server restarted on port ${fresh.marketData.apiServer.port}`)
         }
       }
 
@@ -515,7 +508,7 @@ async function main() {
   // ==================== Engine Context ====================
 
   const ctx: EngineContext = {
-    config, connectorCenter, agentCenter, eventLog, heartbeat, cronEngine, toolCenter,
+    config, connectorCenter, agentCenter, eventLog, toolCallLog, heartbeat, cronEngine, toolCenter,
     accountManager,
     reconnectAccount,
     reconnectConnectors,
@@ -558,6 +551,7 @@ async function main() {
       await plugin.stop()
     }
     await newsStore.close()
+    await toolCallLog.close()
     await eventLog.close()
     await accountManager.closeAll()
     process.exit(0)

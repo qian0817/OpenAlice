@@ -9,7 +9,7 @@ import { WebConnector } from './web-connector.js'
 import { readWebSubchannels } from '../../core/config.js'
 import { createChatRoutes, createMediaRoutes, type SSEClient } from './routes/chat.js'
 import { createChannelsRoutes } from './routes/channels.js'
-import { createConfigRoutes, createOpenbbRoutes } from './routes/config.js'
+import { createConfigRoutes, createMarketDataRoutes } from './routes/config.js'
 import { createEventsRoutes } from './routes/events.js'
 import { createCronRoutes } from './routes/cron.js'
 import { createHeartbeatRoutes } from './routes/heartbeat.js'
@@ -17,6 +17,7 @@ import { createTradingRoutes } from './routes/trading.js'
 import { createTradingConfigRoutes } from './routes/trading-config.js'
 import { createDevRoutes } from './routes/dev.js'
 import { createToolsRoutes } from './routes/tools.js'
+import { createAgentStatusRoutes } from './routes/agent-status.js'
 
 export interface WebConfig {
   port: number
@@ -73,7 +74,7 @@ export class WebPlugin implements Plugin {
     app.route('/api/config', createConfigRoutes({
       onConnectorsChange: async () => { await ctx.reconnectConnectors() },
     }))
-    app.route('/api/openbb', createOpenbbRoutes())
+    app.route('/api/market-data', createMarketDataRoutes())
     app.route('/api/events', createEventsRoutes(ctx))
     app.route('/api/cron', createCronRoutes(ctx))
     app.route('/api/heartbeat', createHeartbeatRoutes(ctx))
@@ -81,6 +82,7 @@ export class WebPlugin implements Plugin {
     app.route('/api/trading', createTradingRoutes(ctx))
     app.route('/api/dev', createDevRoutes(ctx.connectorCenter))
     app.route('/api/tools', createToolsRoutes(ctx.toolCenter))
+    app.route('/api/agent-status', createAgentStatusRoutes(ctx))
 
     // ==================== Serve UI (Vite build output) ====================
     const uiRoot = resolve('dist/ui')

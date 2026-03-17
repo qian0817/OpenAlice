@@ -35,17 +35,22 @@ src/
 │   ├── claude-code/           # Claude Code CLI subprocess
 │   ├── vercel-ai-sdk/         # Vercel AI SDK ToolLoopAgent
 │   └── agent-sdk/             # Agent SDK (@anthropic-ai/claude-agent-sdk)
-├── extension/
-│   ├── analysis-kit/          # Indicators, market data tools, sandbox
-│   ├── equity/                # Equity fundamentals
-│   ├── market/                # Unified symbol search
-│   ├── news/                  # OpenBB news tools
-│   ├── news-collector/        # RSS collector + archive search
+├── domain/
+│   ├── market-data/           # Structured data layer (typebb in-process + OpenBB API remote)
 │   ├── trading/               # Unified multi-account trading, guard pipeline, git-like commits
-│   ├── thinking-kit/          # Reasoning and calculation tools
+│   ├── analysis/              # Indicators, technical analysis, sandbox
+│   ├── news/                  # RSS collector + archive search
 │   ├── brain/                 # Cognitive state (memory, emotion)
-│   └── browser/               # Browser automation bridge (OpenClaw)
-├── openbb/                    # In-process data SDK (equity, crypto, currency, commodity, economy, news)
+│   └── thinking/              # Safe expression evaluator
+├── tool/                      # AI tool definitions — thin bridge from domain to ToolCenter
+│   ├── trading.ts             # Trading tools (delegates to domain/trading)
+│   ├── equity.ts              # Equity fundamental tools (uses domain/market-data)
+│   ├── market.ts              # Symbol search tools (uses domain/market-data)
+│   ├── analysis.ts            # Indicator calculation tools (uses domain/analysis)
+│   ├── news.ts                # News archive tools (uses domain/news)
+│   ├── brain.ts               # Cognition tools (uses domain/brain)
+│   ├── thinking.ts            # Reasoning tools (uses domain/thinking)
+│   └── browser.ts             # Browser automation tools (wraps openclaw)
 ├── connectors/
 │   ├── web/                   # Web UI (Hono, SSE streaming, sub-channels)
 │   ├── telegram/              # Telegram bot (grammY)
@@ -84,7 +89,7 @@ Per-request provider and model overrides via `AskOptions.provider` and `AskOptio
 
 ### ToolCenter
 
-Centralized registry. Extensions register tools, exports in Vercel and MCP formats. Decoupled from AgentCenter.
+Centralized registry. `tool/` files register tools via `ToolCenter.register()`, exports in Vercel and MCP formats. Decoupled from AgentCenter.
 
 ## Conventions
 
