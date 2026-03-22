@@ -24,7 +24,7 @@ export function Card({ children, className = '' }: CardProps) {
 
 interface SectionProps {
   id?: string
-  title: string
+  title: ReactNode
   description?: string
   children: ReactNode
 }

@@ -189,8 +189,8 @@ Persona and heartbeat prompts use a **default + user override** pattern:
 
 | Default (git-tracked) | User override (gitignored) |
 |------------------------|---------------------------|
-| `data/default/persona.default.md` | `data/brain/persona.md` |
-| `data/default/heartbeat.default.md` | `data/brain/heartbeat.md` |
+| `default/persona.default.md` | `data/brain/persona.md` |
+| `default/heartbeat.default.md` | `data/brain/heartbeat.md` |
 
 On first run, defaults are auto-copied to the user override path. Edit the user files to customize without touching version control.
 

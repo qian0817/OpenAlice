@@ -308,63 +308,18 @@ describe('loadTradingConfig', () => {
     expect(mockWriteFile).not.toHaveBeenCalled()
   })
 
-  it('migrates from crypto.json + securities.json when platforms.json is missing', async () => {
-    // platforms.json → ENOENT
-    fileNotFound()
-    // accounts.json → ENOENT
-    fileNotFound()
-    // crypto.json (loaded inside migrateLegacyTradingConfig)
-    fileReturns({
-      provider: {
-        type: 'ccxt',
-        exchange: 'binance',
-        apiKey: 'k1',
-        apiSecret: 's1',
-        sandbox: false,
-        demoTrading: false,
-      },
-      guards: [],
-    })
-    // securities.json
-    fileReturns({
-      provider: { type: 'alpaca', paper: true, apiKey: 'alpk', secretKey: 'alps' },
-      guards: [],
-    })
-
-    const { platforms, accounts } = await loadTradingConfig()
-
-    expect(platforms.find(p => p.type === 'ccxt')).toBeDefined()
-    expect(platforms.find(p => p.type === 'alpaca')).toBeDefined()
-    expect(accounts.find(a => a.id === 'binance-main')).toBeDefined()
-    expect(accounts.find(a => a.id === 'alpaca-paper')).toBeDefined()
-
-    // Should have written platforms.json and accounts.json
-    const writtenPaths = mockWriteFile.mock.calls.map(c => c[0] as string)
-    expect(writtenPaths.some(p => p.endsWith('platforms.json'))).toBe(true)
-    expect(writtenPaths.some(p => p.endsWith('accounts.json'))).toBe(true)
-  })
-
-  it('migrates from legacy with none providers → empty arrays', async () => {
+  it('seeds empty arrays when config files are missing', async () => {
     fileNotFound() // platforms.json
     fileNotFound() // accounts.json
-    fileReturns({ provider: { type: 'none' }, guards: [] }) // crypto.json
-    fileReturns({ provider: { type: 'none' }, guards: [] }) // securities.json
 
     const { platforms, accounts } = await loadTradingConfig()
     expect(platforms).toHaveLength(0)
     expect(accounts).toHaveLength(0)
-  })
 
-  it('falls back to defaults when legacy files are also missing', async () => {
-    fileNotFound() // platforms.json
-    fileNotFound() // accounts.json
-    fileNotFound() // crypto.json
-    fileNotFound() // securities.json
-
-    const { platforms, accounts } = await loadTradingConfig()
-    // Default crypto is ccxt/binance, default securities is alpaca/paper
-    expect(platforms.find(p => p.type === 'ccxt')).toBeDefined()
-    expect(platforms.find(p => p.type === 'alpaca')).toBeDefined()
+    // Should have written empty platforms.json and accounts.json
+    const writtenPaths = mockWriteFile.mock.calls.map(c => c[0] as string)
+    expect(writtenPaths.some(p => p.endsWith('platforms.json'))).toBe(true)
+    expect(writtenPaths.some(p => p.endsWith('accounts.json'))).toBe(true)
   })
 })
 

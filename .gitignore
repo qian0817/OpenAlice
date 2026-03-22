@@ -2,8 +2,6 @@ node_modules/
 dist/
 logs/
 /data/*
-!/data/default/
-!/data/default/**
 state.json
 *.log
 

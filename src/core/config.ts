@@ -69,9 +69,7 @@ const cryptoSchema = z.object({
     z.object({
       type: z.literal('none'),
     }),
-  ]).default({
-    type: 'ccxt', exchange: 'binance', sandbox: false, demoTrading: true,
-  }),
+  ]).default({ type: 'none' }),
   guards: z.array(z.object({
     type: z.string(),
     options: z.record(z.string(), z.unknown()).default({}),
@@ -89,7 +87,7 @@ const securitiesSchema = z.object({
     z.object({
       type: z.literal('none'),
     }),
-  ]).default({ type: 'alpaca', paper: true }),
+  ]).default({ type: 'none' }),
   guards: z.array(z.object({
     type: z.string(),
     options: z.record(z.string(), z.unknown()).default({}),
@@ -162,7 +160,7 @@ const connectorsSchema = z.object({
 const heartbeatSchema = z.object({
   enabled: z.boolean().default(false),
   every: z.string().default('30m'),
-  prompt: z.string().default('Read data/brain/heartbeat.md (or data/default/heartbeat.default.md if not found) and follow the instructions inside.'),
+  prompt: z.string().default('Read data/brain/heartbeat.md (or default/heartbeat.default.md if not found) and follow the instructions inside.'),
   activeHours: activeHoursSchema,
 })
 
@@ -370,8 +368,8 @@ export async function loadConfig(): Promise<Config> {
 // ==================== Trading Config Loader ====================
 
 /**
- * Load platform + account config.
- * Prefers platforms.json + accounts.json. Falls back to legacy crypto.json + securities.json.
+ * Load platform + account config from platforms.json + accounts.json.
+ * Seeds empty arrays on first run — accounts are created via UI wizard.
  */
 export async function loadTradingConfig(): Promise<{
   platforms: PlatformConfig[]
@@ -382,78 +380,17 @@ export async function loadTradingConfig(): Promise<{
     loadJsonFile('accounts.json'),
   ])
 
-  if (rawPlatforms !== undefined && rawAccounts !== undefined) {
-    return {
-      platforms: platformsFileSchema.parse(rawPlatforms),
-      accounts: accountsFileSchema.parse(rawAccounts),
-    }
+  const platforms = platformsFileSchema.parse(rawPlatforms ?? [])
+  const accounts = accountsFileSchema.parse(rawAccounts ?? [])
+
+  // Seed empty files on first run so user has something to edit
+  if (rawPlatforms === undefined || rawAccounts === undefined) {
+    await mkdir(CONFIG_DIR, { recursive: true })
+    const writes: Promise<void>[] = []
+    if (rawPlatforms === undefined) writes.push(writeFile(resolve(CONFIG_DIR, 'platforms.json'), JSON.stringify(platforms, null, 2) + '\n'))
+    if (rawAccounts === undefined) writes.push(writeFile(resolve(CONFIG_DIR, 'accounts.json'), JSON.stringify(accounts, null, 2) + '\n'))
+    await Promise.all(writes)
   }
-
-  // Migration: derive from legacy crypto.json + securities.json
-  return migrateLegacyTradingConfig()
-}
-
-/** Derive platform+account config from old crypto.json + securities.json, then write to disk.
- *  TODO: remove before v1.0 — drop crypto.json/securities.json support entirely */
-async function migrateLegacyTradingConfig(): Promise<{
-  platforms: PlatformConfig[]
-  accounts: AccountConfig[]
-}> {
-  const [rawCrypto, rawSecurities] = await Promise.all([
-    loadJsonFile('crypto.json'),
-    loadJsonFile('securities.json'),
-  ])
-
-  const crypto = cryptoSchema.parse(rawCrypto ?? {})
-  const securities = securitiesSchema.parse(rawSecurities ?? {})
-
-  const platforms: PlatformConfig[] = []
-  const accounts: AccountConfig[] = []
-
-  if (crypto.provider.type === 'ccxt') {
-    const p = crypto.provider
-    const platformId = `${p.exchange}-platform`
-    platforms.push({
-      id: platformId,
-      type: 'ccxt',
-      exchange: p.exchange,
-      sandbox: p.sandbox,
-      demoTrading: p.demoTrading,
-      options: p.options,
-    })
-    accounts.push({
-      id: `${p.exchange}-main`,
-      platformId,
-      apiKey: p.apiKey,
-      apiSecret: p.apiSecret,
-      password: p.password,
-      guards: crypto.guards,
-    })
-  }
-
-  if (securities.provider.type === 'alpaca') {
-    const p = securities.provider
-    const platformId = 'alpaca-platform'
-    platforms.push({
-      id: platformId,
-      type: 'alpaca',
-      paper: p.paper,
-    })
-    accounts.push({
-      id: p.paper ? 'alpaca-paper' : 'alpaca-live',
-      platformId,
-      apiKey: p.apiKey,
-      apiSecret: p.secretKey,
-      guards: securities.guards,
-    })
-  }
-
-  // Seed to disk so the user can edit the new format directly
-  await mkdir(CONFIG_DIR, { recursive: true })
-  await Promise.all([
-    writeFile(resolve(CONFIG_DIR, 'platforms.json'), JSON.stringify(platforms, null, 2) + '\n'),
-    writeFile(resolve(CONFIG_DIR, 'accounts.json'), JSON.stringify(accounts, null, 2) + '\n'),
-  ])
 
   return { platforms, accounts }
 }

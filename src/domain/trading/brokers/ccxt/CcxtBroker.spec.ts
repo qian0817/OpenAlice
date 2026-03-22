@@ -95,11 +95,6 @@ describe('CcxtBroker — constructor', () => {
     )
   })
 
-  it('sets readOnly when no apiKey', () => {
-    const acc = new CcxtBroker({ exchange: 'bybit', apiKey: '', apiSecret: '', sandbox: false })
-    expect((acc as any).readOnly).toBe(true)
-  })
-
   it('stores exchange name in meta', () => {
     const acc = makeAccount()
     expect(acc.meta).toEqual({ exchange: 'bybit' })
@@ -624,11 +619,10 @@ describe('CcxtBroker — getAccount', () => {
     expect(info.realizedPnL).toBe(150)
   })
 
-  it('throws when read-only', async () => {
+  it('throws BrokerError when no API credentials', async () => {
     const acc = new CcxtBroker({ exchange: 'bybit', apiKey: '', apiSecret: '', sandbox: false })
-    ;(acc as any).initialized = true
 
-    await expect(acc.getAccount()).rejects.toThrow('read-only')
+    await expect(acc.init()).rejects.toThrow('No API credentials configured')
   })
 })
 

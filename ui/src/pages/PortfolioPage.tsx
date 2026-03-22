@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api, type Position, type WalletCommitLog } from '../api'
+import { useAccountHealth } from '../hooks/useAccountHealth'
 import { PageHeader } from '../components/PageHeader'
 import { EmptyState } from '../components/StateViews'
 
@@ -32,6 +33,7 @@ const EMPTY: PortfolioData = { equity: null, accounts: [] }
 // ==================== Page ====================
 
 export function PortfolioPage() {
+  const healthMap = useAccountHealth()
   const [data, setData] = useState<PortfolioData>(EMPTY)
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
@@ -63,7 +65,8 @@ export function PortfolioPage() {
   const accountSources = (data.equity?.accounts ?? []).map(eq => {
     const acct = data.accounts.find(a => a.id === eq.id)
     const unrealizedPnL = acct?.positions.reduce((sum, p) => sum + p.unrealizedPnL, 0) ?? 0
-    return { ...eq, provider: acct?.provider ?? '', unrealizedPnL, error: acct?.error, health: eq.health }
+    const hInfo = healthMap[eq.id]
+    return { ...eq, provider: acct?.provider ?? '', unrealizedPnL, error: acct?.error, health: eq.health, disabled: hInfo?.disabled ?? false }
   })
 
   return (
@@ -185,28 +188,33 @@ const HEALTH_DOT: Record<string, string> = {
   offline: 'bg-red',
 }
 
-function AccountStrip({ sources }: { sources: Array<{ id: string; label: string; provider: string; equity: number; unrealizedPnL: number; error?: string; health?: string }> }) {
+function AccountStrip({ sources }: { sources: Array<{ id: string; label: string; provider: string; equity: number; unrealizedPnL: number; error?: string; health?: string; disabled?: boolean }> }) {
   return (
     <div className="flex flex-wrap gap-2">
       {sources.map(s => {
-        const dotColor = HEALTH_DOT[s.health ?? 'healthy'] ?? 'bg-text-muted'
-        const isOffline = s.health === 'offline'
+        const isDisabled = s.disabled
+        const isOffline = s.health === 'offline' && !isDisabled
+        const dotColor = isDisabled
+          ? 'bg-text-muted/40'
+          : (HEALTH_DOT[s.health ?? 'healthy'] ?? 'bg-text-muted')
         return (
-          <div key={s.id} className={`flex items-center gap-2 px-3 py-1.5 rounded-md border border-border bg-bg-secondary text-[12px] ${isOffline ? 'opacity-60' : ''}`}>
+          <div key={s.id} className={`flex items-center gap-2 px-3 py-1.5 rounded-md border border-border bg-bg-secondary text-[12px] ${isOffline || isDisabled ? 'opacity-60' : ''}`}>
             <div className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
             <span className="text-text font-medium">{s.label}</span>
-            {isOffline
-              ? <span className="text-red text-[11px]">Reconnecting…</span>
-              : <>
-                  <span className="text-text-muted">{fmt(s.equity)}</span>
-                  {s.unrealizedPnL !== 0 && (
-                    <span className={s.unrealizedPnL >= 0 ? 'text-green' : 'text-red'}>
-                      {fmtPnl(s.unrealizedPnL)}
-                    </span>
-                  )}
-                </>
+            {isDisabled
+              ? <span className="text-text-muted text-[11px]">Disabled</span>
+              : isOffline
+                ? <span className="text-red text-[11px]">Reconnecting...</span>
+                : <>
+                    <span className="text-text-muted">{fmt(s.equity)}</span>
+                    {s.unrealizedPnL !== 0 && (
+                      <span className={s.unrealizedPnL >= 0 ? 'text-green' : 'text-red'}>
+                        {fmtPnl(s.unrealizedPnL)}
+                      </span>
+                    )}
+                  </>
             }
-            {s.error && !isOffline && <span className="text-text-muted/50">{s.error}</span>}
+            {s.error && !isOffline && !isDisabled && <span className="text-text-muted/50">{s.error}</span>}
           </div>
         )
       })}

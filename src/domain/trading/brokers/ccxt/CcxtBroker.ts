@@ -10,18 +10,19 @@ import ccxt from 'ccxt'
 import Decimal from 'decimal.js'
 import type { Exchange, Order as CcxtOrder } from 'ccxt'
 import { Contract, ContractDescription, ContractDetails, Order, OrderState, UNSET_DOUBLE, UNSET_DECIMAL } from '@traderalice/ibkr'
-import type {
-  IBroker,
-  AccountCapabilities,
-  AccountInfo,
-  Position,
-  PlaceOrderResult,
-  OpenOrder,
-  Quote,
-  MarketClock,
-  FundingRate,
-  OrderBook,
-  OrderBookLevel,
+import {
+  BrokerError,
+  type IBroker,
+  type AccountCapabilities,
+  type AccountInfo,
+  type Position,
+  type PlaceOrderResult,
+  type OpenOrder,
+  type Quote,
+  type MarketClock,
+  type FundingRate,
+  type OrderBook,
+  type OrderBookLevel,
 } from '../types.js'
 import '../../contract-ext.js'
 import type { CcxtBrokerConfig, CcxtMarket } from './ccxt-types.js'
@@ -55,8 +56,6 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
   private exchange: Exchange
   private exchangeName: string
   private initialized = false
-  private readonly readOnly: boolean
-
   // orderId → ccxtSymbol cache (CCXT needs symbol to cancel)
   private orderSymbolCache = new Map<string, string>()
 
@@ -65,7 +64,6 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
     this.meta = { exchange: config.exchange }
     this.id = config.id ?? `${config.exchange}-main`
     this.label = config.label ?? `${config.exchange.charAt(0).toUpperCase() + config.exchange.slice(1)} ${config.sandbox ? 'Testnet' : 'Live'}`
-    this.readOnly = !config.apiKey || !config.apiSecret
 
     const exchanges = ccxt as unknown as Record<string, new (opts: Record<string, unknown>) => Exchange>
     const ExchangeClass = exchanges[config.exchange]
@@ -107,21 +105,13 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
     }
   }
 
-  private ensureWritable(): void {
-    if (this.readOnly) {
-      throw new Error(
-        `CcxtBroker[${this.id}] is in read-only mode (no API keys). This operation requires authentication.`,
-      )
-    }
-  }
-
   // ---- Lifecycle ----
 
   async init(): Promise<void> {
-    if (this.readOnly) {
-      console.log(
-        `CcxtBroker[${this.id}]: no API credentials — running in market-data-only mode. ` +
-        `Set apiKey and apiSecret in accounts.json for trading.`,
+    if (!this.exchange.apiKey || !this.exchange.secret) {
+      throw new BrokerError(
+        'CONFIG',
+        `No API credentials configured. Set apiKey and apiSecret in accounts.json to enable this account.`,
       )
     }
 
@@ -173,8 +163,7 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
       throw new Error(`CcxtBroker[${this.id}]: failed to load any markets`)
     }
     this.initialized = true
-    const mode = this.readOnly ? ', read-only (no API keys)' : ''
-    console.log(`CcxtBroker[${this.id}]: connected (${this.exchangeName}, ${marketCount} markets loaded${mode})`)
+    console.log(`CcxtBroker[${this.id}]: connected (${this.exchangeName}, ${marketCount} markets loaded)`)
   }
 
   async close(): Promise<void> {
@@ -251,7 +240,7 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
 
   async placeOrder(contract: Contract, order: Order, extraParams?: Record<string, unknown>): Promise<PlaceOrderResult> {
     this.ensureInit()
-    this.ensureWritable()
+
 
     const ccxtSymbol = contractToCcxt(contract, this.markets, this.exchangeName)
     if (!ccxtSymbol) {
@@ -309,7 +298,7 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
 
   async cancelOrder(orderId: string): Promise<boolean> {
     this.ensureInit()
-    this.ensureWritable()
+
 
     try {
       const ccxtSymbol = this.orderSymbolCache.get(orderId)
@@ -322,7 +311,7 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
 
   async modifyOrder(orderId: string, changes: Order): Promise<PlaceOrderResult> {
     this.ensureInit()
-    this.ensureWritable()
+
 
     try {
       const ccxtSymbol = this.orderSymbolCache.get(orderId)
@@ -356,7 +345,7 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
 
   async closePosition(contract: Contract, quantity?: Decimal): Promise<PlaceOrderResult> {
     this.ensureInit()
-    this.ensureWritable()
+
 
     const positions = await this.getPositions()
     const ccxtSymbol = contractToCcxt(contract, this.exchange.markets as Record<string, CcxtMarket>, this.exchangeName)
@@ -383,7 +372,7 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
 
   async getAccount(): Promise<AccountInfo> {
     this.ensureInit()
-    this.ensureWritable()
+
 
     const [balance, rawPositions] = await Promise.all([
       this.exchange.fetchBalance(),
@@ -413,7 +402,7 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
 
   async getPositions(): Promise<Position[]> {
     this.ensureInit()
-    this.ensureWritable()
+
 
     const raw = await this.exchange.fetchPositions()
     const result: Position[] = []
@@ -453,7 +442,7 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
 
   async getOrders(orderIds: string[]): Promise<OpenOrder[]> {
     this.ensureInit()
-    this.ensureWritable()
+
 
     const results: OpenOrder[] = []
     for (const id of orderIds) {
@@ -465,7 +454,7 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
 
   async getOrder(orderId: string): Promise<OpenOrder | null> {
     this.ensureInit()
-    this.ensureWritable()
+
 
     const ccxtSymbol = this.orderSymbolCache.get(orderId)
     if (!ccxtSymbol) return null

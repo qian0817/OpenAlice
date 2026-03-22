@@ -65,7 +65,7 @@ const LEGACY_GIT_PATHS: Record<string, string> = {
 const FRONTAL_LOBE_FILE = resolve('data/brain/frontal-lobe.md')
 const EMOTION_LOG_FILE = resolve('data/brain/emotion-log.md')
 const PERSONA_FILE = resolve('data/brain/persona.md')
-const PERSONA_DEFAULT = resolve('data/default/persona.default.md')
+const PERSONA_DEFAULT = resolve('default/persona.default.md')
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -106,6 +106,11 @@ async function loadGitState(accountId: string): Promise<GitExportState | undefin
 async function main() {
   const config = await loadConfig()
 
+  // ==================== Event Log ====================
+
+  const eventLog = await createEventLog()
+  const toolCallLog = await createToolCallLog()
+
   // ==================== Trading Account Manager ====================
 
   const accountManager = new AccountManager()
@@ -131,6 +136,9 @@ async function main() {
       guards: accountCfg.guards,
       savedState,
       onCommit: createGitPersister(filePath),
+      onHealthChange: (accountId, health) => {
+        eventLog.append('account.health', { accountId, ...health })
+      },
       platformId: accountCfg.platformId,
     })
     accountManager.add(uta)
@@ -138,6 +146,10 @@ async function main() {
   }
 
   for (const accCfg of tradingConfig.accounts) {
+    if (!accCfg.apiKey) {
+      console.warn(`Account "${accCfg.id}": no API key configured — skipping. Add credentials in the Trading page or accounts.json.`)
+      continue
+    }
     const platform = platformRegistry.get(accCfg.platformId)!
     await initAccount(accCfg, platform)
   }
@@ -179,11 +191,6 @@ async function main() {
     '',
     `**Emotion:** ${emotion}`,
   ].join('\n')
-
-  // ==================== Event Log ====================
-
-  const eventLog = await createEventLog()
-  const toolCallLog = await createToolCallLog()
 
   // ==================== Cron ====================
 
@@ -343,10 +350,13 @@ async function main() {
         return { success: false, error: `Platform "${accCfg.platformId}" not found for account "${accountId}"` }
       }
 
-      const ok = await initAccount(accCfg, platform)
-      if (!ok) {
+      const uta = await initAccount(accCfg, platform)
+      if (!uta) {
         return { success: false, error: `Account "${accountId}" init failed` }
       }
+
+      // Wait for broker.init() + broker.getAccount() to verify the connection
+      await uta.waitForConnect()
 
       // Re-register CCXT-specific tools if this is a CCXT account
       if (platform.providerType !== 'alpaca') {
@@ -356,7 +366,7 @@ async function main() {
         )
       }
 
-      const label = accountManager.get(accountId)?.label ?? accountId
+      const label = uta.label ?? accountId
       console.log(`reconnect: ${label} online`)
       return { success: true, message: `${label} reconnected` }
     } catch (err) {

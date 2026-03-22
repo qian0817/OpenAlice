@@ -147,6 +147,26 @@ export interface CronJob {
 
 // ==================== Trading ====================
 
+export type BrokerHealth = 'healthy' | 'degraded' | 'offline'
+
+export interface BrokerHealthInfo {
+  status: BrokerHealth
+  consecutiveFailures: number
+  lastError?: string
+  lastSuccessAt?: string
+  lastFailureAt?: string
+  recovering: boolean
+  disabled: boolean
+}
+
+export interface AccountSummary {
+  id: string
+  label: string
+  platformId?: string
+  capabilities: { supportedSecTypes: string[]; supportedOrderTypes: string[] }
+  health: BrokerHealthInfo
+}
+
 export interface TradingAccount {
   id: string
   provider: string
@@ -281,4 +301,10 @@ export interface AccountConfig {
 export interface GuardEntry {
   type: string
   options: Record<string, unknown>
+}
+
+export interface TestConnectionResult {
+  success: boolean
+  error?: string
+  account?: unknown
 }
