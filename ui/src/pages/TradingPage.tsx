@@ -8,7 +8,7 @@ import { useTradingConfig } from '../hooks/useTradingConfig'
 import { useAccountHealth } from '../hooks/useAccountHealth'
 import { PageHeader } from '../components/PageHeader'
 import { api } from '../api'
-import type { AccountConfig, CcxtAccountConfig, AlpacaAccountConfig, BrokerHealthInfo } from '../api/types'
+import type { AccountConfig, CcxtAccountConfig, AlpacaAccountConfig, IbkrAccountConfig, BrokerHealthInfo } from '../api/types'
 
 // ==================== Constants ====================
 
@@ -87,7 +87,7 @@ export function TradingPage() {
           existingAccountIds={tc.accounts.map((a) => a.id)}
           onSave={async (account) => {
             await tc.saveAccount(account)
-            if (account.apiKey) {
+            if ('apiKey' in account && account.apiKey) {
               const result = await tc.reconnectAccount(account.id)
               if (!result.success) {
                 throw new Error(result.error || 'Connection failed')
@@ -222,11 +222,15 @@ function AccountCard({ account, health, onClick }: {
   const isDisabled = health?.disabled
   const badge = account.type === 'ccxt'
     ? { text: 'CC', color: 'text-accent bg-accent/10' }
-    : { text: 'AL', color: 'text-green bg-green/10' }
+    : account.type === 'ibkr'
+      ? { text: 'IB', color: 'text-orange-400 bg-orange-400/10' }
+      : { text: 'AL', color: 'text-green bg-green/10' }
 
   const subtitle = account.type === 'ccxt'
     ? [account.exchange, account.demoTrading && 'Demo', account.sandbox && 'Sandbox'].filter(Boolean).join(' · ')
-    : account.paper ? 'Paper Trading' : 'Live Trading'
+    : account.type === 'ibkr'
+      ? `TWS ${account.host ?? '127.0.0.1'}:${account.port ?? 7497}`
+      : account.paper ? 'Paper Trading' : 'Live Trading'
 
   return (
     <button
@@ -521,18 +525,20 @@ function EditDialog({ account, health, onSaveAccount, onDelete, onClose }: {
           <div className="mb-3">
             <span className="text-[12px] text-text-muted">Type</span>
             <span className="ml-2 text-[12px] font-medium text-text">
-              {account.type === 'ccxt' ? 'CCXT' : 'Alpaca'}
+              {account.type === 'ccxt' ? 'CCXT' : account.type === 'ibkr' ? 'Interactive Brokers' : 'Alpaca'}
             </span>
           </div>
           {draft.type === 'ccxt' ? (
             <CcxtConnectionFields draft={draft} onPatch={patch} />
-          ) : (
+          ) : draft.type === 'alpaca' ? (
             <AlpacaConnectionFields draft={draft} onPatch={patch} />
+          ) : (
+            <IbkrConnectionFields draft={draft as IbkrAccountConfig} onPatch={patch} />
           )}
         </Section>
 
-        {/* Credentials */}
-        <Section title={
+        {/* Credentials — not shown for IBKR (auth via TWS login) */}
+        {account.type !== 'ibkr' && <Section title={
           <div className="flex items-center justify-between w-full">
             <span>Credentials</span>
             <button
@@ -544,17 +550,17 @@ function EditDialog({ account, health, onSaveAccount, onDelete, onClose }: {
           </div>
         }>
           <Field label="API Key">
-            <input className={inputClass} type={showKeys ? 'text' : 'password'} value={draft.apiKey || ''} onChange={(e) => patch('apiKey', e.target.value)} placeholder="Not configured" />
+            <input className={inputClass} type={showKeys ? 'text' : 'password'} value={'apiKey' in draft ? (draft.apiKey || '') : ''} onChange={(e) => patch('apiKey', e.target.value)} placeholder="Not configured" />
           </Field>
           <Field label={account.type === 'alpaca' ? 'Secret Key' : 'API Secret'}>
-            <input className={inputClass} type={showKeys ? 'text' : 'password'} value={draft.apiSecret || ''} onChange={(e) => patch('apiSecret', e.target.value)} placeholder="Not configured" />
+            <input className={inputClass} type={showKeys ? 'text' : 'password'} value={'apiSecret' in draft ? (draft.apiSecret || '') : ''} onChange={(e) => patch('apiSecret', e.target.value)} placeholder="Not configured" />
           </Field>
           {account.type === 'ccxt' && (
             <Field label="Password (optional)">
               <input className={inputClass} type={showKeys ? 'text' : 'password'} value={'password' in draft ? (draft as CcxtAccountConfig).password || '' : ''} onChange={(e) => patch('password', e.target.value)} placeholder="Required by some exchanges (e.g. OKX)" />
             </Field>
           )}
-        </Section>
+        </Section>}
 
         {/* Guards */}
         <div>
@@ -639,6 +645,30 @@ function AlpacaConnectionFields({ draft, onPatch }: {
         <span className="text-[13px] text-text">Paper Trading</span>
       </label>
       <p className="text-[11px] text-text-muted/60 mt-1">When enabled, orders are routed to Alpaca's paper trading environment.</p>
+    </>
+  )
+}
+
+function IbkrConnectionFields({ draft, onPatch }: {
+  draft: IbkrAccountConfig
+  onPatch: (field: string, value: unknown) => void
+}) {
+  const inputClass = 'w-full bg-bg border border-border rounded-md px-3 py-1.5 text-[13px] text-text placeholder:text-text-muted/40 focus:outline-none focus:ring-1 focus:ring-accent'
+  return (
+    <>
+      <Field label="Host">
+        <input className={inputClass} value={draft.host ?? '127.0.0.1'} onChange={(e) => onPatch('host', e.target.value)} placeholder="127.0.0.1" />
+      </Field>
+      <Field label="Port">
+        <input className={inputClass} type="number" value={draft.port ?? 7497} onChange={(e) => onPatch('port', parseInt(e.target.value) || 7497)} />
+      </Field>
+      <Field label="Client ID">
+        <input className={inputClass} type="number" value={draft.clientId ?? 0} onChange={(e) => onPatch('clientId', parseInt(e.target.value) || 0)} />
+      </Field>
+      <Field label="Account ID (optional)">
+        <input className={inputClass} value={draft.accountId ?? ''} onChange={(e) => onPatch('accountId', e.target.value || undefined)} placeholder="Auto-detected from TWS" />
+      </Field>
+      <p className="text-[11px] text-text-muted/60">Authentication is handled by TWS/Gateway login — no API keys needed.</p>
     </>
   )
 }

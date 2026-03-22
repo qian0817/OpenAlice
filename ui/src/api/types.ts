@@ -290,7 +290,18 @@ export interface AlpacaAccountConfig {
   guards: GuardEntry[]
 }
 
-export type AccountConfig = CcxtAccountConfig | AlpacaAccountConfig
+export interface IbkrAccountConfig {
+  id: string
+  label?: string
+  type: 'ibkr'
+  host: string
+  port: number
+  clientId: number
+  accountId?: string
+  guards: GuardEntry[]
+}
+
+export type AccountConfig = CcxtAccountConfig | AlpacaAccountConfig | IbkrAccountConfig
 
 export interface GuardEntry {
   type: string

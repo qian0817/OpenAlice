@@ -21,3 +21,7 @@ export type { AlpacaBrokerConfig } from './alpaca/index.js'
 export { CcxtBroker } from './ccxt/index.js'
 export { createCcxtProviderTools } from './ccxt/index.js'
 export type { CcxtBrokerConfig } from './ccxt/index.js'
+
+// IBKR
+export { IbkrBroker } from './ibkr/index.js'
+export type { IbkrBrokerConfig } from './ibkr/index.js'

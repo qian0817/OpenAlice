@@ -236,9 +236,21 @@ const alpacaAccountSchema = z.object({
   guards: z.array(guardConfigSchema).default([]),
 })
 
+const ibkrAccountSchema = z.object({
+  id: z.string(),
+  label: z.string().optional(),
+  type: z.literal('ibkr'),
+  host: z.string().default('127.0.0.1'),
+  port: z.number().int().default(7497),
+  clientId: z.number().int().default(0),
+  accountId: z.string().optional(),
+  guards: z.array(guardConfigSchema).default([]),
+})
+
 export const accountConfigSchema = z.discriminatedUnion('type', [
   ccxtAccountSchema,
   alpacaAccountSchema,
+  ibkrAccountSchema,
 ])
 
 export const accountsFileSchema = z.array(accountConfigSchema)
