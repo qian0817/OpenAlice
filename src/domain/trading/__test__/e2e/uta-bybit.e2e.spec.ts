@@ -52,9 +52,9 @@ describe('UTA — Bybit lifecycle (ETH perp)', () => {
     // === Stage + Commit + Push: buy 0.01 ETH ===
     const addResult = uta!.stagePlaceOrder({
       aliceId: ethAliceId,
-      side: 'buy',
-      type: 'market',
-      qty: 0.01,
+      action: 'BUY',
+      orderType: 'MKT',
+      totalQuantity: 0.01,
     })
     expect(addResult.staged).toBe(true)
     console.log(`  staged: ok`)

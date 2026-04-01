@@ -43,11 +43,11 @@ describe('UTA — Alpaca order lifecycle', () => {
     const addResult = uta!.stagePlaceOrder({
       aliceId,
       symbol: 'AAPL',
-      side: 'buy',
-      type: 'limit',
-      price: 1.00,
-      qty: 1,
-      timeInForce: 'gtc',
+      action: 'BUY',
+      orderType: 'LMT',
+      lmtPrice: 1.00,
+      totalQuantity: 1,
+      tif: 'GTC',
     })
     expect(addResult.staged).toBe(true)
 
@@ -96,9 +96,9 @@ describe('UTA — Alpaca fill flow (AAPL)', () => {
     const addResult = uta!.stagePlaceOrder({
       aliceId,
       symbol: 'AAPL',
-      side: 'buy',
-      type: 'market',
-      qty: 1,
+      action: 'BUY',
+      orderType: 'MKT',
+      totalQuantity: 1,
     })
     expect(addResult.staged).toBe(true)
 

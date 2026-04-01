@@ -188,6 +188,7 @@ export class IbkrBroker implements IBroker {
       if (changes.tif) mergedOrder.tif = changes.tif
       if (changes.orderType) mergedOrder.orderType = changes.orderType
       if (changes.trailingPercent != null) mergedOrder.trailingPercent = changes.trailingPercent
+      if (changes.trailStopPrice != null) mergedOrder.trailStopPrice = changes.trailStopPrice
 
       const numericId = parseInt(orderId, 10)
       const promise = this.bridge.requestOrder(numericId)

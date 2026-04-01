@@ -30,27 +30,6 @@ import type {
 import { createGuardPipeline, resolveGuards } from './guards/index.js'
 import './contract-ext.js'
 
-// ==================== IBKR field mapping ====================
-
-/** Map human-readable order type → IBKR short code. */
-function toIbkrOrderType(type: string): string {
-  switch (type) {
-    case 'market': return 'MKT'
-    case 'limit': return 'LMT'
-    case 'stop': return 'STP'
-    case 'stop_limit': return 'STP LMT'
-    case 'trailing_stop': return 'TRAIL'
-    case 'trailing_stop_limit': return 'TRAIL LIMIT'
-    case 'moc': return 'MOC'
-    default: return type.toUpperCase()
-  }
-}
-
-/** Map human-readable TIF → IBKR short code. */
-function toIbkrTif(tif: string): string {
-  return tif.toUpperCase()
-}
-
 // ==================== Options ====================
 
 export interface UnifiedTradingAccountOptions {
@@ -67,30 +46,30 @@ export interface UnifiedTradingAccountOptions {
 export interface StagePlaceOrderParams {
   aliceId: string
   symbol?: string
-  side: 'buy' | 'sell'
-  type: string
-  qty?: number
-  notional?: number
-  price?: number
-  stopPrice?: number
-  trailingAmount?: number
+  action: 'BUY' | 'SELL'
+  orderType: string
+  totalQuantity?: number
+  cashQty?: number
+  lmtPrice?: number
+  auxPrice?: number
+  trailStopPrice?: number
   trailingPercent?: number
-  timeInForce?: string
+  tif?: string
   goodTillDate?: string
-  extendedHours?: boolean
+  outsideRth?: boolean
   parentId?: string
   ocaGroup?: string
 }
 
 export interface StageModifyOrderParams {
   orderId: string
-  qty?: number
-  price?: number
-  stopPrice?: number
-  trailingAmount?: number
+  totalQuantity?: number
+  lmtPrice?: number
+  auxPrice?: number
+  trailStopPrice?: number
   trailingPercent?: number
-  type?: string
-  timeInForce?: string
+  orderType?: string
+  tif?: string
   goodTillDate?: string
 }
 
@@ -366,18 +345,18 @@ export class UnifiedTradingAccount {
     if (params.symbol) contract.symbol = params.symbol
 
     const order = new Order()
-    order.action = params.side === 'buy' ? 'BUY' : 'SELL'
-    order.orderType = toIbkrOrderType(params.type)
-    order.tif = toIbkrTif(params.timeInForce ?? 'day')
+    order.action = params.action
+    order.orderType = params.orderType
+    order.tif = params.tif ?? 'DAY'
 
-    if (params.qty != null) order.totalQuantity = new Decimal(String(params.qty))
-    if (params.notional != null) order.cashQty = params.notional
-    if (params.price != null) order.lmtPrice = params.price
-    if (params.stopPrice != null) order.auxPrice = params.stopPrice
-    if (params.trailingAmount != null) order.trailStopPrice = params.trailingAmount
+    if (params.totalQuantity != null) order.totalQuantity = new Decimal(String(params.totalQuantity))
+    if (params.cashQty != null) order.cashQty = params.cashQty
+    if (params.lmtPrice != null) order.lmtPrice = params.lmtPrice
+    if (params.auxPrice != null) order.auxPrice = params.auxPrice
+    if (params.trailStopPrice != null) order.trailStopPrice = params.trailStopPrice
     if (params.trailingPercent != null) order.trailingPercent = params.trailingPercent
     if (params.goodTillDate != null) order.goodTillDate = params.goodTillDate
-    if (params.extendedHours) order.outsideRth = true
+    if (params.outsideRth) order.outsideRth = true
     if (params.parentId != null) order.parentId = parseInt(params.parentId, 10) || 0
     if (params.ocaGroup != null) order.ocaGroup = params.ocaGroup
 
@@ -386,13 +365,13 @@ export class UnifiedTradingAccount {
 
   stageModifyOrder(params: StageModifyOrderParams): AddResult {
     const changes: Partial<Order> = {}
-    if (params.qty != null) changes.totalQuantity = new Decimal(String(params.qty))
-    if (params.price != null) changes.lmtPrice = params.price
-    if (params.stopPrice != null) changes.auxPrice = params.stopPrice
-    if (params.trailingAmount != null) changes.trailStopPrice = params.trailingAmount
+    if (params.totalQuantity != null) changes.totalQuantity = new Decimal(String(params.totalQuantity))
+    if (params.lmtPrice != null) changes.lmtPrice = params.lmtPrice
+    if (params.auxPrice != null) changes.auxPrice = params.auxPrice
+    if (params.trailStopPrice != null) changes.trailStopPrice = params.trailStopPrice
     if (params.trailingPercent != null) changes.trailingPercent = params.trailingPercent
-    if (params.type != null) changes.orderType = toIbkrOrderType(params.type)
-    if (params.timeInForce != null) changes.tif = toIbkrTif(params.timeInForce)
+    if (params.orderType != null) changes.orderType = params.orderType
+    if (params.tif != null) changes.tif = params.tif
     if (params.goodTillDate != null) changes.goodTillDate = params.goodTillDate
 
     return this.git.add({ action: 'modifyOrder', orderId: params.orderId, changes })
