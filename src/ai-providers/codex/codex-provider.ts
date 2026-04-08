@@ -69,19 +69,18 @@ export class CodexProvider implements AIProvider {
     const instructions = await this.getSystemPrompt()
 
     try {
-      const response = await client.responses.create({
+      // Use streaming — the ChatGPT subscription endpoint may not support non-streaming
+      const stream = client.responses.stream({
         model,
         instructions,
         input: [{ role: 'user' as const, content: prompt }],
         store: false,
       })
 
-      const text = response.output
-        .filter((item): item is OpenAI.Responses.ResponseOutputMessage => item.type === 'message')
-        .flatMap(msg => msg.content)
-        .filter((c): c is OpenAI.Responses.ResponseOutputText => c.type === 'output_text')
-        .map(c => c.text)
-        .join('')
+      let text = ''
+      for await (const event of stream) {
+        if (event.type === 'response.output_text.delta') text += event.delta
+      }
 
       return { text: text || '(no output)', media: [] }
     } catch (err) {
