@@ -262,26 +262,29 @@ function ProfileCreateModal({ presets, existingNames, onSave, onClose }: {
     data.preset = selectedPreset.id
     const profileData = data as unknown as Profile
 
-    // Step 1: Test connectivity (before saving)
+    // Test connectivity (don't save yet — user must confirm)
     setTesting(true)
     try {
       const result = await api.config.testProfile(profileData)
       setTestResult(result)
-      setTesting(false)
-
-      if (!result.ok) return // Don't save if test failed
     } catch (err) {
       setTestResult({ ok: false, error: err instanceof Error ? err.message : 'Test failed' })
+    } finally {
       setTesting(false)
-      return
     }
+  }
 
-    // Step 2: Save (test passed)
-    setSaving(true)
+  const handleSave = async () => {
+    if (!selectedPreset) return
+    const trimmedName = name.trim()
+    if (!trimmedName) return
+    const data = getSubmitData()
+    data.preset = selectedPreset.id
+    setSaving(true); setError('')
     try {
-      await onSave(trimmedName, profileData)
+      await onSave(trimmedName, data as unknown as Profile)
       setSaving(false)
-      setTimeout(onClose, 1500)
+      onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
       setSaving(false)
@@ -355,9 +358,15 @@ function ProfileCreateModal({ presets, existingNames, onSave, onClose }: {
             </div>
           )}
           <div className="flex items-center gap-2 pt-2 border-t border-border mt-4">
-            <button onClick={handleCreate} disabled={saving || testing} className="btn-primary">
-              {saving ? 'Creating...' : testing ? 'Testing...' : 'Create & Test'}
-            </button>
+            {testResult?.ok ? (
+              <button onClick={handleSave} disabled={saving} className="btn-primary">
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+            ) : (
+              <button onClick={handleCreate} disabled={testing} className="btn-primary">
+                {testing ? 'Testing...' : 'Test Connection'}
+              </button>
+            )}
             <button onClick={() => setSelectedPreset(null)} className="btn-secondary">Back</button>
           </div>
         </div>
