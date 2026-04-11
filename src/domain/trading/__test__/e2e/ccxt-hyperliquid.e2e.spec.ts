@@ -64,6 +64,11 @@ describe('CcxtBroker — Hyperliquid e2e', () => {
     console.log(`  ${positions.length} open positions`)
     for (const p of positions) {
       expect(p.currency).toBeDefined()
+      // Regression: hyperliquid's CCXT parsePosition leaves markPrice undefined.
+      // Our override recovers it from notional / contracts — verify it's > 0.
+      expect(p.marketPrice, `marketPrice missing for ${p.contract.symbol}`).toBeGreaterThan(0)
+      // marketValue should equal qty × markPrice
+      expect(p.marketValue).toBeCloseTo(p.quantity.toNumber() * p.marketPrice, 2)
       console.log(`    ${p.contract.symbol}: ${p.side} ${p.quantity} @ ${p.marketPrice} ${p.currency}`)
     }
   })

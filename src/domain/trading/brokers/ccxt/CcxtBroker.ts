@@ -40,6 +40,7 @@ import {
   defaultFetchOrderById,
   defaultCancelOrderById,
   defaultPlaceOrder,
+  defaultFetchPositions,
 } from './overrides.js'
 
 const STABLECOIN_TO_USD = new Set(['USDT', 'USDC', 'BUSD', 'DAI', 'TUSD'])
@@ -369,16 +370,10 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
         ? order.lmtPrice
         : undefined
 
-      const place = this.overrides.placeOrder ?? defaultPlaceOrder
-      const ccxtOrder = await place(
-        this.exchange,
-        ccxtSymbol,
-        ccxtOrderType,
-        side,
-        parseFloat(size),
-        refPrice,
-        params,
-      )
+      const placeOverride = this.overrides.placeOrder
+      const ccxtOrder = placeOverride
+        ? await placeOverride(this.exchange, ccxtSymbol, ccxtOrderType, side, parseFloat(size), refPrice, params, defaultPlaceOrder)
+        : await defaultPlaceOrder(this.exchange, ccxtSymbol, ccxtOrderType, side, parseFloat(size), refPrice, params)
 
       // Cache orderId → symbol
       if (ccxtOrder.id) {
@@ -400,8 +395,12 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
 
     try {
       const ccxtSymbol = this.orderSymbolCache.get(orderId)
-      const cancel = this.overrides.cancelOrderById ?? defaultCancelOrderById
-      await cancel(this.exchange, orderId, ccxtSymbol)
+      const cancelOverride = this.overrides.cancelOrderById
+      if (cancelOverride) {
+        await cancelOverride(this.exchange, orderId, ccxtSymbol, defaultCancelOrderById)
+      } else {
+        await defaultCancelOrderById(this.exchange, orderId, ccxtSymbol)
+      }
       const orderState = new OrderState()
       orderState.status = 'Cancelled'
       return { success: true, orderId, orderState }
@@ -420,8 +419,10 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
       }
 
       // editOrder requires type and side — fetch the original order to fill in defaults.
-      const fetch = this.overrides.fetchOrderById ?? defaultFetchOrderById
-      const original = await fetch(this.exchange, orderId, ccxtSymbol)
+      const fetchOverride = this.overrides.fetchOrderById
+      const original = fetchOverride
+        ? await fetchOverride(this.exchange, orderId, ccxtSymbol, defaultFetchOrderById)
+        : await defaultFetchOrderById(this.exchange, orderId, ccxtSymbol)
       const qty = changes.totalQuantity != null && !changes.totalQuantity.equals(UNSET_DECIMAL) ? parseFloat(changes.totalQuantity.toString()) : original.amount
       const price = changes.lmtPrice != null && changes.lmtPrice !== UNSET_DOUBLE ? changes.lmtPrice : original.price
 
@@ -534,7 +535,10 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
     this.ensureInit()
 
     try {
-      const raw = await this.exchange.fetchPositions()
+      const fetchOverride = this.overrides.fetchPositions
+      const raw = fetchOverride
+        ? await fetchOverride(this.exchange, defaultFetchPositions)
+        : await defaultFetchPositions(this.exchange)
       const result: Position[] = []
 
       for (const p of raw) {
@@ -589,9 +593,11 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
     const ccxtSymbol = this.orderSymbolCache.get(orderId)
     if (!ccxtSymbol) return null
 
-    const fetch = this.overrides.fetchOrderById ?? defaultFetchOrderById
+    const fetchOverride = this.overrides.fetchOrderById
     try {
-      const order = await fetch(this.exchange, orderId, ccxtSymbol)
+      const order = fetchOverride
+        ? await fetchOverride(this.exchange, orderId, ccxtSymbol, defaultFetchOrderById)
+        : await defaultFetchOrderById(this.exchange, orderId, ccxtSymbol)
       return this.convertCcxtOrder(order)
     } catch {
       return null
