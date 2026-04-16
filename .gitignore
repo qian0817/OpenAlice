@@ -17,6 +17,7 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+*.iml
 
 # Build cache
 *.tsbuildinfo

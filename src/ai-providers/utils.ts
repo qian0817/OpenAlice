@@ -25,13 +25,13 @@ export function stripImageData(raw: string): string {
 
 /** Tools pre-approved in normal mode (no Bash). */
 export const NORMAL_ALLOWED_TOOLS = [
-  'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
+  "Skill", 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
   'mcp__open-alice__*',
 ]
 
 /** Tools pre-approved in evolution mode (includes Bash). */
 export const EVOLUTION_ALLOWED_TOOLS = [
-  'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
+  "Skill", 'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
   'mcp__open-alice__*',
 ]
 

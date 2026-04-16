@@ -11,15 +11,17 @@
 
 import { tool } from 'ai'
 import { z } from 'zod'
-import type { SymbolIndex } from '@/domain/market-data/equity/symbol-index'
+import type { SymbolIndex } from '@/domain/market-data'
 import type { CryptoClientLike, CurrencyClientLike } from '@/domain/market-data/client/types'
 import type { CommodityCatalog } from '@/domain/market-data/commodity/commodity-catalog'
+import type { ChinaSymbolIndex } from '@/domain/market-data/china'
 
 export function createMarketSearchTools(
   symbolIndex: SymbolIndex,
   cryptoClient: CryptoClientLike,
   currencyClient: CurrencyClientLike,
   commodityCatalog: CommodityCatalog,
+  chinaSymbolIndex?: ChinaSymbolIndex,
 ) {
   return {
     marketSearchForResearch: tool({
@@ -29,12 +31,11 @@ Returns matching symbols with assetClass attribution ("equity", "crypto", "curre
 Equity results come from SEC/TMX listings (~13k US/CA stocks); crypto and currency results
 come from Yahoo Finance fuzzy search; commodity results come from a canonical catalog (~25 items).
 Currency results are filtered to XXXUSD pairs only.
-
 For commodities, use the canonical id (e.g. "gold", "crude_oil", "copper") with calculateIndicator
 and other tools — provider-specific tickers (GC=F, GCUSD) are resolved automatically.
-
+${chinaSymbolIndex ? 'China A-share stocks (Shanghai/Shenzhen) are also included in equity results (source: akshare).' : ''}
 If unsure about the symbol, use this to find the correct one for market data tools
-(equityGetProfile, equityGetFinancials, calculateIndicator, etc.).
+(equityGetProfile, equityGetFinancials, calculateIndicator, chinaEquityGetHistory, etc.).
 This is NOT for trading — use searchContracts to find broker-tradeable contracts.`,
       inputSchema: z.object({
         query: z.string().describe('Keyword to search, e.g. "AAPL", "bitcoin", "EUR"'),
@@ -43,9 +44,14 @@ This is NOT for trading — use searchContracts to find broker-tradeable contrac
       execute: async ({ query, limit }) => {
         const cap = limit ?? 20
 
-        // equity + commodity: 本��同步搜索
+        // equity + commodity: 本地同步搜索
         const equityResults = symbolIndex.search(query, cap).map((r) => ({ ...r, assetClass: 'equity' as const }))
         const commodityResults = commodityCatalog.search(query, cap).map((r) => ({ ...r, assetClass: 'commodity' as const }))
+
+        // china equity: 本地同步搜索（如果已配置）
+        const chinaResults = chinaSymbolIndex
+          ? chinaSymbolIndex.search(query, cap).map((r) => ({ ...r, assetClass: 'equity' as const }))
+          : []
 
         // crypto + currency: yfinance 在线搜索，并行，容错
         const [cryptoSettled, currencySettled] = await Promise.allSettled([
@@ -65,7 +71,7 @@ This is NOT for trading — use searchContracts to find broker-tradeable contrac
           })
           .map((r) => ({ ...r, assetClass: 'currency' as const }))
 
-        const results = [...equityResults, ...cryptoResults, ...currencyResults, ...commodityResults]
+        const results = [...equityResults, ...chinaResults, ...cryptoResults, ...currencyResults, ...commodityResults]
         if (results.length === 0) {
           return { results: [], message: `No symbols matching "${query}". Try a different keyword.` }
         }

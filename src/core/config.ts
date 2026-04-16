@@ -187,6 +187,11 @@ const marketDataSchema = z.object({
   }).default({ enabled: true, port: 6901 }),
 })
 
+const chinaMarketDataSchema = z.object({
+  enabled: z.boolean().default(false),
+  akshareApiUrl: z.string().default('http://localhost:8001'),
+}).default({ enabled: false, akshareApiUrl: 'http://localhost:8001' })
+
 const compactionSchema = z.object({
   maxContextTokens: z.number().default(200_000),
   maxOutputTokens: z.number().default(20_000),
@@ -279,6 +284,7 @@ export type Config = {
   crypto: z.infer<typeof cryptoSchema>
   securities: z.infer<typeof securitiesSchema>
   marketData: z.infer<typeof marketDataSchema>
+  chinaMarketData: z.infer<typeof chinaMarketDataSchema>
   compaction: z.infer<typeof compactionSchema>
   aiProvider: z.infer<typeof aiProviderSchema>
   heartbeat: z.infer<typeof heartbeatSchema>
@@ -318,7 +324,7 @@ async function parseAndSeed<T>(filename: string, schema: z.ZodType<T>, raw: unkn
 }
 
 export async function loadConfig(): Promise<Config> {
-  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'compaction.json', 'ai-provider-manager.json', 'heartbeat.json', 'snapshot.json', 'connectors.json', 'news.json', 'tools.json'] as const
+  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'compaction.json', 'ai-provider-manager.json', 'heartbeat.json', 'snapshot.json', 'connectors.json', 'news.json', 'tools.json', 'china-market-data.json'] as const
   const raws = await Promise.all(files.map((f) => loadJsonFile(f)))
 
   // TODO: remove all migration blocks before v1.0 — no stable release yet, breaking changes are fine
@@ -472,18 +478,19 @@ export async function loadConfig(): Promise<Config> {
   }
 
   return {
-    engine:        await parseAndSeed(files[0], engineSchema, raws[0]),
-    agent:         await parseAndSeed(files[1], agentSchema, raws[1]),
-    crypto:        await parseAndSeed(files[2], cryptoSchema, raws[2]),
-    securities:    await parseAndSeed(files[3], securitiesSchema, raws[3]),
-    marketData:    await parseAndSeed(files[4], marketDataSchema, raws[4]),
-    compaction:    await parseAndSeed(files[5], compactionSchema, raws[5]),
-    aiProvider:    await parseAndSeed(files[6], aiProviderSchema, raws[6]),
-    heartbeat:     await parseAndSeed(files[7], heartbeatSchema, raws[7]),
-    snapshot:      await parseAndSeed(files[8], snapshotSchema, raws[8]),
-    connectors:    await parseAndSeed(files[9], connectorsSchema, raws[9]),
-    news:          await parseAndSeed(files[10], newsCollectorSchema, raws[10]),
-    tools:         await parseAndSeed(files[11], toolsSchema, raws[11]),
+    engine:          await parseAndSeed(files[0], engineSchema, raws[0]),
+    agent:           await parseAndSeed(files[1], agentSchema, raws[1]),
+    crypto:          await parseAndSeed(files[2], cryptoSchema, raws[2]),
+    securities:      await parseAndSeed(files[3], securitiesSchema, raws[3]),
+    marketData:      await parseAndSeed(files[4], marketDataSchema, raws[4]),
+    compaction:      await parseAndSeed(files[5], compactionSchema, raws[5]),
+    aiProvider:      await parseAndSeed(files[6], aiProviderSchema, raws[6]),
+    heartbeat:       await parseAndSeed(files[7], heartbeatSchema, raws[7]),
+    snapshot:        await parseAndSeed(files[8], snapshotSchema, raws[8]),
+    connectors:      await parseAndSeed(files[9], connectorsSchema, raws[9]),
+    news:            await parseAndSeed(files[10], newsCollectorSchema, raws[10]),
+    tools:           await parseAndSeed(files[11], toolsSchema, raws[11]),
+    chinaMarketData: await parseAndSeed(files[12], chinaMarketDataSchema, raws[12]),
   }
 }
 
@@ -646,6 +653,7 @@ const sectionSchemas: Record<ConfigSection, z.ZodTypeAny> = {
   crypto: cryptoSchema,
   securities: securitiesSchema,
   marketData: marketDataSchema,
+  chinaMarketData: chinaMarketDataSchema,
   compaction: compactionSchema,
   aiProvider: aiProviderSchema,
   heartbeat: heartbeatSchema,
@@ -661,6 +669,7 @@ const sectionFiles: Record<ConfigSection, string> = {
   crypto: 'crypto.json',
   securities: 'securities.json',
   marketData: 'market-data.json',
+  chinaMarketData: 'china-market-data.json',
   compaction: 'compaction.json',
   aiProvider: 'ai-provider-manager.json',
   heartbeat: 'heartbeat.json',

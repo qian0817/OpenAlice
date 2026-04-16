@@ -55,12 +55,12 @@ export interface AgentSdkResult {
 // ==================== Tool lists ====================
 
 const NORMAL_ALLOWED_TOOLS = [
-  'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
+  "Skill", 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
   'mcp__open-alice__*',
 ]
 
 const EVOLUTION_ALLOWED_TOOLS = [
-  'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
+  "Skill", 'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
   'mcp__open-alice__*',
 ]
 
@@ -122,6 +122,8 @@ export async function askAgentSdk(
   const isOAuthMode = loginMethod === 'claudeai'
 
   const env: Record<string, string | undefined> = { ...process.env }
+  // Prevent "nested session" detection when launched from within Claude Code
+  delete env.CLAUDECODE
   if (isOAuthMode) {
     // Force OAuth by removing any inherited API key
     delete env.ANTHROPIC_API_KEY
@@ -144,13 +146,14 @@ export async function askAgentSdk(
   const messages: AgentSdkMessage[] = []
   let resultText = ''
   let ok = true
-
+  console.log(`cwd: ${cwd}`)
   try {
     for await (const event of sdkQuery({
       prompt,
       options: {
         cwd,
         env,
+        settingSources: ["project"],
         model: override?.model ?? 'claude-sonnet-4-6',
         maxTurns,
         allowedTools: finalAllowed,
