@@ -3,6 +3,7 @@ import { api, type ChatHistoryItem } from '../api'
 import type { DiaryCycle, DiaryOutcome } from '../api/diary'
 import { ToolCallGroup } from '../components/ChatMessage'
 import { MarkdownContent } from '../components/MarkdownContent'
+import { BrainSidebar } from '../components/BrainSidebar'
 
 // ==================== Constants ====================
 
@@ -266,7 +267,8 @@ export function DiaryPage() {
 
   return (
     <div className="flex flex-1 min-h-0">
-      <div className="flex flex-col flex-1 min-h-0 max-w-[760px] mx-auto w-full">
+      {/* Main feed column — left-aligned, not centered, so the right-side Brain sidebar has room on wide screens. */}
+      <div className="flex flex-col flex-1 min-h-0 max-w-[760px]">
         {/* Slim header */}
         <div className="flex items-baseline gap-3 px-5 pt-6 pb-4 shrink-0">
           <h1 className="text-xl font-semibold text-text tracking-tight">Diary</h1>
@@ -283,6 +285,11 @@ export function DiaryPage() {
               <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
             </svg>
           </button>
+        </div>
+
+        {/* Narrow-screen Brain panels — flat layout above the feed, default collapsed. */}
+        <div className="lg:hidden px-5 pb-3 shrink-0">
+          <BrainSidebar variant="flat" />
         </div>
 
         {/* Feed */}
@@ -330,6 +337,17 @@ export function DiaryPage() {
           )}
         </div>
       </div>
+
+      {/* Wide-screen Brain sidebar — always-expanded panels on the right. */}
+      <aside className="hidden lg:flex flex-col shrink-0 w-72 xl:w-80 border-l border-border/30 bg-bg-secondary/10">
+        <div className="flex items-center gap-2 px-4 pt-6 pb-4 shrink-0">
+          <h2 className="text-[13px] font-semibold text-text tracking-tight">Brain</h2>
+          <span className="text-[11px] text-text-muted/60">Alice's inner state</span>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-6">
+          <BrainSidebar variant="sidebar" />
+        </div>
+      </aside>
     </div>
   )
 }

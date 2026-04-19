@@ -16,6 +16,7 @@ import { agentStatusApi } from './agentStatus'
 import { personaApi } from './persona'
 import { newsApi } from './news'
 import { diaryApi } from './diary'
+import { brainApi } from './brain'
 import { topologyApi } from './topology'
 export const api = {
   chat: chatApi,
@@ -32,6 +33,7 @@ export const api = {
   persona: personaApi,
   news: newsApi,
   diary: diaryApi,
+  brain: brainApi,
   topology: topologyApi,
 }
 
