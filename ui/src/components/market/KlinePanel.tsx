@@ -11,12 +11,18 @@ import {
 } from 'lightweight-charts'
 import { marketApi, type AssetClass, type HistoricalBar } from '../../api/market'
 
-type Timeframe = '1M' | '3M' | '1Y' | '5Y' | 'All'
+type Interval = '1m' | '5m' | '1h' | '1d'
+type Timeframe = '1D' | '5D' | '1M' | '3M' | '1Y' | '5Y' | 'All'
 
-const TIMEFRAMES: Timeframe[] = ['1M', '3M', '1Y', '5Y', 'All']
+const INTERVALS: Interval[] = ['1m', '5m', '1h', '1d']
+const TIMEFRAMES: Timeframe[] = ['1D', '5D', '1M', '3M', '1Y', '5Y', 'All']
+
+const INTRADAY: ReadonlySet<Interval> = new Set(['1m', '5m', '1h'])
 
 function daysForTimeframe(tf: Timeframe): number | null {
   switch (tf) {
+    case '1D': return 1
+    case '5D': return 5
     case '1M': return 30
     case '3M': return 90
     case '1Y': return 365
@@ -25,16 +31,24 @@ function daysForTimeframe(tf: Timeframe): number | null {
   }
 }
 
-function toUTCTimestamp(dateStr: string): UTCTimestamp {
-  return Math.floor(new Date(`${dateStr}T00:00:00Z`).getTime() / 1000) as UTCTimestamp
+function startDateFromToday(days: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - days)
+  return d.toISOString().slice(0, 10)
+}
+
+function toUTCTimestamp(s: string): UTCTimestamp {
+  // Daily bars use `YYYY-MM-DD`; intraday uses `YYYY-MM-DD HH:MM:SS`.
+  const iso = s.includes(' ') ? s.replace(' ', 'T') + 'Z' : `${s}T00:00:00Z`
+  return Math.floor(new Date(iso).getTime() / 1000) as UTCTimestamp
 }
 
 interface Props {
-  /** null = nothing selected yet; show empty state. */
   selection: { symbol: string; assetClass: AssetClass } | null
 }
 
 export function KlinePanel({ selection }: Props) {
+  const [interval, setInterval] = useState<Interval>('1d')
   const [tf, setTf] = useState<Timeframe>('1Y')
   const [bars, setBars] = useState<HistoricalBar[] | null>(null)
   const [provider, setProvider] = useState<string | null>(null)
@@ -45,32 +59,6 @@ export function KlinePanel({ selection }: Props) {
   const chartRef = useRef<IChartApi | null>(null)
   const candleRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const volumeRef = useRef<ISeriesApi<'Histogram'> | null>(null)
-
-  // Fetch bars once per symbol (NOT per timeframe — timeframe is client-side zoom).
-  useEffect(() => {
-    if (!selection) { setBars(null); setProvider(null); setError(null); return }
-    if (selection.assetClass === 'commodity') {
-      setBars(null)
-      setProvider(null)
-      setError('Commodity K-line support is coming in the next step.')
-      return
-    }
-    setLoading(true)
-    setError(null)
-    marketApi.historical(selection.assetClass, selection.symbol, { interval: '1d' })
-      .then((res) => {
-        if (res.error || !res.results) {
-          setError(res.error ?? 'No data returned.')
-          setBars(null)
-          setProvider(null)
-        } else {
-          setBars(res.results)
-          setProvider(res.provider || null)
-        }
-      })
-      .catch((e) => { setError(e instanceof Error ? e.message : String(e)); setBars(null); setProvider(null) })
-      .finally(() => setLoading(false))
-  }, [selection])
 
   // Build chart once.
   useEffect(() => {
@@ -117,9 +105,48 @@ export function KlinePanel({ selection }: Props) {
     }
   }, [])
 
-  // Push bars into chart.
+  // Toggle time-axis detail when interval flips between intraday and daily.
   useEffect(() => {
-    if (!candleRef.current || !volumeRef.current) return
+    chartRef.current?.timeScale().applyOptions({ timeVisible: INTRADAY.has(interval) })
+  }, [interval])
+
+  // Fetch bars on any of: symbol, interval, timeframe.
+  useEffect(() => {
+    if (!selection) { setBars(null); setProvider(null); setError(null); return }
+    if (selection.assetClass === 'commodity') {
+      setBars(null)
+      setProvider(null)
+      setError('Commodity K-line support is coming in the next step.')
+      return
+    }
+    setLoading(true)
+    setError(null)
+    const days = daysForTimeframe(tf)
+    const opts: { interval: string; startDate?: string } = { interval }
+    if (days != null) opts.startDate = startDateFromToday(days)
+
+    marketApi.historical(selection.assetClass, selection.symbol, opts)
+      .then((res) => {
+        if (res.error || !res.results) {
+          setError(res.error ?? 'No data returned.')
+          setBars(null)
+          setProvider(null)
+        } else if (res.results.length === 0) {
+          setError('No bars in this range.')
+          setBars([])
+          setProvider(res.provider || null)
+        } else {
+          setBars(res.results)
+          setProvider(res.provider || null)
+        }
+      })
+      .catch((e) => { setError(e instanceof Error ? e.message : String(e)); setBars(null); setProvider(null) })
+      .finally(() => setLoading(false))
+  }, [selection, interval, tf])
+
+  // Push bars into chart and fit.
+  useEffect(() => {
+    if (!candleRef.current || !volumeRef.current || !chartRef.current) return
     if (!bars || bars.length === 0) {
       candleRef.current.setData([])
       volumeRef.current.setData([])
@@ -141,23 +168,8 @@ export function KlinePanel({ selection }: Props) {
 
     candleRef.current.setData(candleData)
     volumeRef.current.setData(volumeData)
+    chartRef.current.timeScale().fitContent()
   }, [bars])
-
-  // Apply visible range whenever timeframe or bars change.
-  useEffect(() => {
-    const chart = chartRef.current
-    if (!chart || !bars || bars.length === 0) return
-
-    const days = daysForTimeframe(tf)
-    if (!days) {
-      chart.timeScale().fitContent()
-      return
-    }
-    const lastTime = toUTCTimestamp(bars[bars.length - 1].date)
-    const firstAvailable = toUTCTimestamp(bars[0].date)
-    const from = Math.max(lastTime - days * 86400, firstAvailable) as UTCTimestamp
-    chart.timeScale().setVisibleRange({ from, to: lastTime })
-  }, [tf, bars])
 
   const title = useMemo(() => {
     if (!selection) return 'Select a symbol'
@@ -166,32 +178,53 @@ export function KlinePanel({ selection }: Props) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between py-2 px-1">
-        <div className="flex items-center gap-2">
-          <span className="text-[13px] font-medium text-text">{title}</span>
+      <div className="flex items-center justify-between py-2 px-1 gap-3 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[13px] font-medium text-text truncate">{title}</span>
           {provider && (
             <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-bg-tertiary text-text-muted font-medium">
               {provider}
             </span>
           )}
           {bars && bars.length > 0 && (
-            <span className="text-[11px] text-text-muted/60">
+            <span className="text-[11px] text-text-muted/60 truncate">
               {bars.length} bars · {bars[0].date} → {bars[bars.length - 1].date}
             </span>
           )}
         </div>
-        <div className="flex border border-border rounded overflow-hidden">
-          {TIMEFRAMES.map((t, i) => (
-            <button
-              key={t}
-              onClick={() => setTf(t)}
-              className={`px-2.5 py-1 text-[12px] transition-colors cursor-pointer ${
-                i > 0 ? 'border-l border-border' : ''
-              } ${tf === t ? 'bg-bg-tertiary text-text' : 'text-text-muted hover:text-text'}`}
-            >
-              {t}
-            </button>
-          ))}
+        <div className="flex items-center gap-5 flex-wrap">
+          <label className="flex items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wide text-text-muted/70">Interval</span>
+            <div className="flex border border-border rounded overflow-hidden" title="Candle width (how much time each bar covers)">
+              {INTERVALS.map((iv, i) => (
+                <button
+                  key={iv}
+                  onClick={() => setInterval(iv)}
+                  className={`px-2 py-1 text-[12px] transition-colors cursor-pointer ${
+                    i > 0 ? 'border-l border-border' : ''
+                  } ${interval === iv ? 'bg-bg-tertiary text-text' : 'text-text-muted hover:text-text'}`}
+                >
+                  {iv}
+                </button>
+              ))}
+            </div>
+          </label>
+          <label className="flex items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wide text-text-muted/70">Range</span>
+            <div className="flex border border-border rounded overflow-hidden" title="How far back to load history">
+              {TIMEFRAMES.map((t, i) => (
+                <button
+                  key={t}
+                  onClick={() => setTf(t)}
+                  className={`px-2 py-1 text-[12px] transition-colors cursor-pointer ${
+                    i > 0 ? 'border-l border-border' : ''
+                  } ${tf === t ? 'bg-bg-tertiary text-text' : 'text-text-muted hover:text-text'}`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          </label>
         </div>
       </div>
 
