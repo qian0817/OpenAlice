@@ -1,24 +1,27 @@
 <p align="center">
-  <img src="docs/images/alice-full.png" alt="OpenAlice" width="128">
+  <img src="docs/images/alice-full.png" alt="OpenAlice" width="140">
+</p>
+
+<h1 align="center">OpenAlice</h1>
+
+<p align="center">
+  <strong>Your one-person Wall Street.</strong><br>
+  An AI trading agent covering equities, crypto, commodities, forex, and macro — from research through position entry, ongoing management, to exit.
 </p>
 
 <p align="center">
   <a href="https://github.com/TraderAlice/OpenAlice/actions/workflows/ci.yml"><img src="https://github.com/TraderAlice/OpenAlice/actions/workflows/ci.yml/badge.svg" alt="CI"></a> · <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="License: AGPL-3.0"></a> · <a href="https://openalice.ai"><img src="https://img.shields.io/badge/Website-openalice.ai-blue" alt="openalice.ai"></a> · <a href="https://openalice.ai/docs"><img src="https://img.shields.io/badge/Docs-Read-green" alt="Docs"></a> · <a href="https://deepwiki.com/TraderAlice/OpenAlice"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
 </p>
 
-# OpenAlice
-
-Your one-person Wall Street. Alice is an AI trading agent that covers equities, crypto, commodities, forex, and macro — from research and analysis through position entry, ongoing management, to exit. 
+<p align="center">
+  <img src="docs/images/preview.png" alt="OpenAlice Preview" width="720">
+</p>
 
 - **Full-spectrum** — analyze and trade across asset classes. Multiple brokers combine into one unified workspace so you're never stuck with "I can see it but can't trade it."
 - **Full-lifecycle** — not just entry signals. Research, position sizing, ongoing monitoring, risk management, and exit decisions — Alice covers the entire trading lifecycle, 24/7.
 - **Full-control** — every trade goes through version history and safety checks, and requires your explicit approval before execution. You see every step, you can stop every step.
 
 Alice runs on your own machine, because trading involves private keys and real money — that trust can't be outsourced.
-
-<p align="center">
-  <img src="docs/images/preview.png" alt="OpenAlice Preview" width="720">
-</p>
 
 > [!CAUTION]
 > **OpenAlice is experimental software in active development.** Many features and interfaces are incomplete and subject to breaking changes. Do not use this software for live trading with real funds unless you fully understand and accept the risks involved. The authors provide no guarantees of correctness, reliability, or profitability, and accept no liability for financial losses.

@@ -48,12 +48,12 @@ export interface StagePlaceOrderParams {
   symbol?: string
   action: 'BUY' | 'SELL'
   orderType: string
-  totalQuantity?: number
-  cashQty?: number
-  lmtPrice?: number
-  auxPrice?: number
-  trailStopPrice?: number
-  trailingPercent?: number
+  totalQuantity?: number | string
+  cashQty?: number | string
+  lmtPrice?: number | string
+  auxPrice?: number | string
+  trailStopPrice?: number | string
+  trailingPercent?: number | string
   tif?: string
   goodTillDate?: string
   outsideRth?: boolean
@@ -65,11 +65,11 @@ export interface StagePlaceOrderParams {
 
 export interface StageModifyOrderParams {
   orderId: string
-  totalQuantity?: number
-  lmtPrice?: number
-  auxPrice?: number
-  trailStopPrice?: number
-  trailingPercent?: number
+  totalQuantity?: number | string
+  lmtPrice?: number | string
+  auxPrice?: number | string
+  trailStopPrice?: number | string
+  trailingPercent?: number | string
   orderType?: string
   tif?: string
   goodTillDate?: string
@@ -352,11 +352,11 @@ export class UnifiedTradingAccount {
     order.tif = params.tif ?? 'DAY'
 
     if (params.totalQuantity != null) order.totalQuantity = new Decimal(String(params.totalQuantity))
-    if (params.cashQty != null) order.cashQty = params.cashQty
-    if (params.lmtPrice != null) order.lmtPrice = params.lmtPrice
-    if (params.auxPrice != null) order.auxPrice = params.auxPrice
-    if (params.trailStopPrice != null) order.trailStopPrice = params.trailStopPrice
-    if (params.trailingPercent != null) order.trailingPercent = params.trailingPercent
+    if (params.cashQty != null) order.cashQty = new Decimal(String(params.cashQty))
+    if (params.lmtPrice != null) order.lmtPrice = new Decimal(String(params.lmtPrice))
+    if (params.auxPrice != null) order.auxPrice = new Decimal(String(params.auxPrice))
+    if (params.trailStopPrice != null) order.trailStopPrice = new Decimal(String(params.trailStopPrice))
+    if (params.trailingPercent != null) order.trailingPercent = new Decimal(String(params.trailingPercent))
     if (params.goodTillDate != null) order.goodTillDate = params.goodTillDate
     if (params.outsideRth) order.outsideRth = true
     if (params.parentId != null) order.parentId = parseInt(params.parentId, 10) || 0
@@ -373,10 +373,10 @@ export class UnifiedTradingAccount {
   stageModifyOrder(params: StageModifyOrderParams): AddResult {
     const changes: Partial<Order> = {}
     if (params.totalQuantity != null) changes.totalQuantity = new Decimal(String(params.totalQuantity))
-    if (params.lmtPrice != null) changes.lmtPrice = params.lmtPrice
-    if (params.auxPrice != null) changes.auxPrice = params.auxPrice
-    if (params.trailStopPrice != null) changes.trailStopPrice = params.trailStopPrice
-    if (params.trailingPercent != null) changes.trailingPercent = params.trailingPercent
+    if (params.lmtPrice != null) changes.lmtPrice = new Decimal(String(params.lmtPrice))
+    if (params.auxPrice != null) changes.auxPrice = new Decimal(String(params.auxPrice))
+    if (params.trailStopPrice != null) changes.trailStopPrice = new Decimal(String(params.trailStopPrice))
+    if (params.trailingPercent != null) changes.trailingPercent = new Decimal(String(params.trailingPercent))
     if (params.orderType != null) changes.orderType = params.orderType
     if (params.tif != null) changes.tif = params.tif
     if (params.goodTillDate != null) changes.goodTillDate = params.goodTillDate

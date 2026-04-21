@@ -47,6 +47,18 @@ const NAV_SECTIONS: NavSection[] = [
         ),
       },
       {
+        page: 'market',
+        label: 'Market',
+        icon: (active) => (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M7 4v16" />
+            <rect x="5" y="8" width="4" height="8" rx="1" />
+            <path d="M17 4v16" />
+            <rect x="15" y="6" width="4" height="10" rx="1" />
+          </svg>
+        ),
+      },
+      {
         page: 'news',
         label: 'News',
         icon: (active) => (
@@ -55,6 +67,16 @@ const NAV_SECTIONS: NavSection[] = [
             <path d="M10 7h8" />
             <path d="M10 11h8" />
             <path d="M10 15h4" />
+          </svg>
+        ),
+      },
+      {
+        page: 'diary',
+        label: 'Diary',
+        icon: (active) => (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
           </svg>
         ),
       },

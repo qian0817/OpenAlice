@@ -131,7 +131,7 @@ describe('IbkrBroker — order lifecycle', () => {
     const order = new Order()
     order.action = 'BUY'
     order.orderType = 'LMT'
-    order.lmtPrice = 1.00
+    order.lmtPrice = new Decimal('1.00')
     order.totalQuantity = new Decimal('1')
     order.tif = 'GTC'
 

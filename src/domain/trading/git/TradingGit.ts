@@ -6,7 +6,7 @@
 
 import { createHash } from 'crypto'
 import Decimal from 'decimal.js'
-import { Order, UNSET_DOUBLE, UNSET_DECIMAL } from '@traderalice/ibkr'
+import { Order, UNSET_DECIMAL } from '@traderalice/ibkr'
 import type { ITradingGit, TradingGitConfig } from './interfaces.js'
 import type {
   CommitHash,
@@ -241,8 +241,8 @@ export class TradingGit implements ITradingGit {
         const qty = op.order?.totalQuantity
         const cashQty = op.order?.cashQty
         const hasQty = qty && !qty.equals(UNSET_DECIMAL)
-        const hasCash = cashQty !== UNSET_DOUBLE && cashQty > 0
-        const sizeStr = hasCash ? `$${cashQty}` : hasQty ? `${qty}` : '?'
+        const hasCash = cashQty && !cashQty.equals(UNSET_DECIMAL) && cashQty.gt(0)
+        const sizeStr = hasCash ? `$${cashQty.toFixed()}` : hasQty ? `${qty.toFixed()}` : '?'
 
         if (result?.status === 'user-rejected') {
           return `${side} ${sizeStr} (user-rejected)`
@@ -336,9 +336,26 @@ export class TradingGit implements ITradingGit {
 
   private static rehydrateOrder(order: Order): Order {
     const rehydrated = Object.assign(new Order(), order)
-    // totalQuantity is the critical Decimal field on Order
+    // Decimal fields need re-wrapping after JSON.parse — strings or numbers
+    // become plain JS values, not Decimal instances. `new Decimal(String(x))`
+    // accepts both legacy (number) and current (string) persisted forms.
     if (order.totalQuantity != null) {
       rehydrated.totalQuantity = new Decimal(String(order.totalQuantity))
+    }
+    if (order.lmtPrice != null) {
+      rehydrated.lmtPrice = new Decimal(String(order.lmtPrice))
+    }
+    if (order.auxPrice != null) {
+      rehydrated.auxPrice = new Decimal(String(order.auxPrice))
+    }
+    if (order.trailStopPrice != null) {
+      rehydrated.trailStopPrice = new Decimal(String(order.trailStopPrice))
+    }
+    if (order.trailingPercent != null) {
+      rehydrated.trailingPercent = new Decimal(String(order.trailingPercent))
+    }
+    if (order.cashQty != null) {
+      rehydrated.cashQty = new Decimal(String(order.cashQty))
     }
     return rehydrated
   }

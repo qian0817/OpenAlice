@@ -67,7 +67,7 @@ describe('UTA — operation dispatch', () => {
       order.action = 'BUY'
       order.orderType = 'LMT'
       order.totalQuantity = new Decimal(5)
-      order.lmtPrice = 150
+      order.lmtPrice = new Decimal(150)
 
       uta.git.add({ action: 'placeOrder', contract, order })
       uta.git.commit('limit buy AAPL')
@@ -78,7 +78,7 @@ describe('UTA — operation dispatch', () => {
       expect(passedContract.secType).toBe('STK')
       expect(passedContract.currency).toBe('USD')
       expect(passedContract.exchange).toBe('NASDAQ')
-      expect(passedOrder.lmtPrice).toBe(150)
+      expect(passedOrder.lmtPrice.toNumber()).toBe(150)
     })
 
     it('returns submitted result in push (fill confirmed via sync)', async () => {
@@ -274,34 +274,56 @@ describe('UTA — stagePlaceOrder', () => {
   it('sets cashQty', () => {
     uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', cashQty: 5000 })
     const { order } = getStagedPlaceOrder(uta)
-    expect(order.cashQty).toBe(5000)
+    expect(order.cashQty.toNumber()).toBe(5000)
   })
 
   it('sets lmtPrice and auxPrice', () => {
     uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'STP LMT', totalQuantity: 10, lmtPrice: 150, auxPrice: 145 })
     const { order } = getStagedPlaceOrder(uta)
-    expect(order.lmtPrice).toBe(150)
-    expect(order.auxPrice).toBe(145)
+    expect(order.lmtPrice.toNumber()).toBe(150)
+    expect(order.auxPrice.toNumber()).toBe(145)
   })
 
   it('auxPrice sets trailing offset for TRAIL orders', () => {
     uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'SELL', orderType: 'TRAIL', totalQuantity: 10, auxPrice: 5 })
     const { order } = getStagedPlaceOrder(uta)
-    expect(order.auxPrice).toBe(5)
+    expect(order.auxPrice.toNumber()).toBe(5)
     expect(order.orderType).toBe('TRAIL')
   })
 
   it('TRAIL order with trailStopPrice and auxPrice', () => {
     uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'SELL', orderType: 'TRAIL', totalQuantity: 10, trailStopPrice: 145, auxPrice: 5 })
     const { order } = getStagedPlaceOrder(uta)
-    expect(order.trailStopPrice).toBe(145)
-    expect(order.auxPrice).toBe(5)
+    expect(order.trailStopPrice.toNumber()).toBe(145)
+    expect(order.auxPrice.toNumber()).toBe(5)
   })
 
   it('sets trailingPercent', () => {
     uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'SELL', orderType: 'TRAIL', totalQuantity: 10, trailingPercent: 2.5 })
     const { order } = getStagedPlaceOrder(uta)
-    expect(order.trailingPercent).toBe(2.5)
+    expect(order.trailingPercent.toNumber()).toBe(2.5)
+  })
+
+  it('preserves string-input precision for price fields (crypto-scale)', () => {
+    uta.stagePlaceOrder({
+      aliceId: 'mock-paper|ETH', action: 'BUY', orderType: 'LMT',
+      totalQuantity: '0.12345678', lmtPrice: '0.00001234',
+    })
+    const { order } = getStagedPlaceOrder(uta)
+    expect(order.totalQuantity.toFixed()).toBe('0.12345678')
+    expect(order.lmtPrice.toFixed()).toBe('0.00001234')
+  })
+
+  it('JSON round-trips staged price as string (not number)', () => {
+    uta.stagePlaceOrder({
+      aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'LMT',
+      totalQuantity: 10, lmtPrice: 145.25,
+    })
+    const wire = JSON.parse(JSON.stringify(uta.status()))
+    const staged = wire.staged[0]
+    expect(typeof staged.order.lmtPrice).toBe('string')
+    expect(staged.order.lmtPrice).toBe('145.25')
+    expect(typeof staged.order.totalQuantity).toBe('string')
   })
 
   it('defaults tif to DAY', () => {
@@ -382,7 +404,7 @@ describe('UTA — stageModifyOrder', () => {
     expect(op.orderId).toBe('ord-1')
     expect(op.changes.totalQuantity).toBeInstanceOf(Decimal)
     expect(op.changes.totalQuantity!.toNumber()).toBe(20)
-    expect(op.changes.lmtPrice).toBe(155)
+    expect(op.changes.lmtPrice!.toNumber()).toBe(155)
     expect(op.changes.orderType).toBe('LMT')
     expect(op.changes.tif).toBe('GTC')
   })
@@ -391,7 +413,7 @@ describe('UTA — stageModifyOrder', () => {
     uta.stageModifyOrder({ orderId: 'ord-1', lmtPrice: 160 })
     const staged = uta.status().staged
     const op = staged[0] as Extract<Operation, { action: 'modifyOrder' }>
-    expect(op.changes.lmtPrice).toBe(160)
+    expect(op.changes.lmtPrice!.toNumber()).toBe(160)
     expect(op.changes.totalQuantity).toBeUndefined()
     expect(op.changes.orderType).toBeUndefined()
     expect(op.changes.tif).toBeUndefined()

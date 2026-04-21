@@ -10,7 +10,7 @@ import { z } from 'zod'
 import ccxt from 'ccxt'
 import Decimal from 'decimal.js'
 import type { Exchange, Order as CcxtOrder } from 'ccxt'
-import { Contract, ContractDescription, ContractDetails, Order, OrderState, UNSET_DOUBLE, UNSET_DECIMAL } from '@traderalice/ibkr'
+import { Contract, ContractDescription, ContractDetails, Order, OrderState, UNSET_DECIMAL } from '@traderalice/ibkr'
 import {
   BrokerError,
   type IBroker,
@@ -332,19 +332,22 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
       return { success: false, error: 'Cannot resolve contract to CCXT symbol' }
     }
 
-    // Use toString() to preserve Decimal precision — never go through IEEE 754 float
+    // Use toFixed() to preserve Decimal precision across any scale.
+    // toString() would emit scientific notation for small values.
     let size: string | undefined = !order.totalQuantity.equals(UNSET_DECIMAL)
-      ? order.totalQuantity.toString()
+      ? order.totalQuantity.toFixed()
       : undefined
 
     // cashQty (notional) → size conversion
-    if (!size && order.cashQty !== UNSET_DOUBLE && order.cashQty > 0) {
+    if (!size && !order.cashQty.equals(UNSET_DECIMAL) && order.cashQty.gt(0)) {
       const ticker = await this.exchange.fetchTicker(ccxtSymbol)
-      const price = order.lmtPrice !== UNSET_DOUBLE ? order.lmtPrice : ticker.last
-      if (!price) {
+      const price = !order.lmtPrice.equals(UNSET_DECIMAL)
+        ? order.lmtPrice
+        : ticker.last != null ? new Decimal(ticker.last) : null
+      if (!price || price.isZero()) {
         return { success: false, error: 'Cannot determine price for notional conversion' }
       }
-      size = String(order.cashQty / price)
+      size = order.cashQty.div(price).toFixed()
     }
 
     if (!size) {
@@ -366,8 +369,9 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
 
       const ccxtOrderType = ibkrOrderTypeToCcxt(order.orderType)
       const side = order.action.toLowerCase() as 'buy' | 'sell'
-      const refPrice = ccxtOrderType === 'limit' && order.lmtPrice !== UNSET_DOUBLE
-        ? order.lmtPrice
+      // CCXT SDK expects number for price — convert at the wire boundary.
+      const refPrice = ccxtOrderType === 'limit' && !order.lmtPrice.equals(UNSET_DECIMAL)
+        ? order.lmtPrice.toNumber()
         : undefined
 
       const placeOverride = this.overrides.placeOrder
@@ -423,14 +427,14 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
       const original = fetchOverride
         ? await fetchOverride(this.exchange, orderId, ccxtSymbol, defaultFetchOrderById)
         : await defaultFetchOrderById(this.exchange, orderId, ccxtSymbol)
-      const qty = changes.totalQuantity != null && !changes.totalQuantity.equals(UNSET_DECIMAL) ? parseFloat(changes.totalQuantity.toString()) : original.amount
-      const price = changes.lmtPrice != null && changes.lmtPrice !== UNSET_DOUBLE ? changes.lmtPrice : original.price
+      const qty = changes.totalQuantity != null && !changes.totalQuantity.equals(UNSET_DECIMAL) ? changes.totalQuantity.toNumber() : original.amount
+      const price = changes.lmtPrice != null && !changes.lmtPrice.equals(UNSET_DECIMAL) ? changes.lmtPrice.toNumber() : original.price
 
       // Extra params for fields that don't fit editOrder's positional arguments
       const params: Record<string, unknown> = {}
-      if (changes.auxPrice != null && changes.auxPrice !== UNSET_DOUBLE) params.stopPrice = changes.auxPrice
-      if (changes.trailStopPrice != null && changes.trailStopPrice !== UNSET_DOUBLE) params.trailStopPrice = changes.trailStopPrice
-      if (changes.trailingPercent != null && changes.trailingPercent !== UNSET_DOUBLE) params.trailingPercent = changes.trailingPercent
+      if (changes.auxPrice != null && !changes.auxPrice.equals(UNSET_DECIMAL)) params.stopPrice = changes.auxPrice.toNumber()
+      if (changes.trailStopPrice != null && !changes.trailStopPrice.equals(UNSET_DECIMAL)) params.trailStopPrice = changes.trailStopPrice.toNumber()
+      if (changes.trailingPercent != null && !changes.trailingPercent.equals(UNSET_DECIMAL)) params.trailingPercent = changes.trailingPercent.toNumber()
       if (changes.tif) params.timeInForce = changes.tif.toLowerCase()
 
       const result = await this.exchange.editOrder(
@@ -618,7 +622,7 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
     order.action = (o.side ?? 'buy').toUpperCase()
     order.totalQuantity = new Decimal(o.amount ?? 0)
     order.orderType = (o.type ?? 'market').toUpperCase()
-    if (o.price != null) order.lmtPrice = o.price
+    if (o.price != null) order.lmtPrice = new Decimal(o.price)
     order.orderId = parseInt(o.id, 10) || 0
 
     const tp = o.takeProfitPrice

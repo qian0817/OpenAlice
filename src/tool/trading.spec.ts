@@ -111,7 +111,7 @@ describe('createTradingTools — getOrders summarization', () => {
     order.action = overrides?.action ?? 'BUY'
     order.orderType = overrides?.orderType ?? 'MKT'
     order.totalQuantity = new Decimal(overrides?.qty ?? 10)
-    if (overrides?.lmtPrice != null) order.lmtPrice = overrides.lmtPrice
+    if (overrides?.lmtPrice != null) order.lmtPrice = new Decimal(overrides.lmtPrice)
     const orderState = new OrderState()
     orderState.status = overrides?.status ?? 'Submitted'
     return { contract, order, orderState }
@@ -189,8 +189,25 @@ describe('createTradingTools — getOrders summarization', () => {
     const result = await (tools.getOrders.execute as Function)({ source: 'mock-paper' })
     const order = result[0]
 
-    expect(order.lmtPrice).toBe(150)
+    expect(order.lmtPrice).toBe('150')
     expect(order.tpsl).toEqual({ takeProfit: { price: '160' }, stopLoss: { price: '140' } })
+  })
+
+  it('emits price fields as decimal strings (not numbers)', async () => {
+    const broker = new MockBroker({ id: 'mock-paper' })
+    const mgr = makeManager(broker)
+    const tools = createTradingTools(mgr)
+
+    const uta = mgr.resolve('mock-paper')[0]
+    vi.spyOn(uta, 'getPendingOrderIds').mockReturnValue([{ orderId: 'ord-1', symbol: 'ETH' }])
+    const openOrder = makeOpenOrder({ symbol: 'ETH', orderType: 'LMT' })
+    openOrder.order.lmtPrice = new Decimal('0.00001234')
+    vi.spyOn(uta, 'getOrders').mockResolvedValue([openOrder])
+
+    const result = await (tools.getOrders.execute as Function)({ source: 'mock-paper' })
+    const order = result[0]
+    expect(typeof order.lmtPrice).toBe('string')
+    expect(order.lmtPrice).toBe('0.00001234')
   })
 
   it('preserves string orderId from getPendingOrderIds', async () => {

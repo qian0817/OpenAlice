@@ -20,6 +20,11 @@ export interface ModelOption {
   label: string
 }
 
+export interface EndpointOption {
+  id: string
+  label: string
+}
+
 export interface PresetDef {
   id: string
   label: string
@@ -29,6 +34,7 @@ export interface PresetDef {
   defaultName: string
   zodSchema: z.ZodType
   models?: ModelOption[]
+  endpoints?: EndpointOption[]
   writeOnlyFields?: string[]
 }
 
@@ -40,13 +46,14 @@ export const CLAUDE_OAUTH: PresetDef = {
   description: 'Use your Claude Pro/Max subscription',
   category: 'official',
   defaultName: 'Claude (Pro/Max)',
-  hint: 'Requires Claude Code CLI login. Run `claude login` in your terminal first.',
+  hint: 'Requires Claude Code CLI login — run `claude login` in your terminal first. Model is switchable here or from the profile list anytime; Opus is most capable but burns subscription quota faster, so consider Sonnet for routine work.',
   zodSchema: z.object({
     backend: z.literal('agent-sdk'),
     loginMethod: z.literal('claudeai'),
-    model: z.string().default('claude-sonnet-4-6').describe('Model'),
+    model: z.string().default('claude-opus-4-7').describe('Model'),
   }),
   models: [
+    { id: 'claude-opus-4-7', label: 'Claude Opus 4.7' },
     { id: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
     { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
   ],
@@ -58,13 +65,15 @@ export const CLAUDE_API: PresetDef = {
   description: 'Pay per token via Anthropic API',
   category: 'official',
   defaultName: 'Claude (API Key)',
+  hint: 'Model is switchable here or from the profile list anytime. Opus is ~5× the cost of Sonnet; Haiku is cheapest for high-volume work.',
   zodSchema: z.object({
     backend: z.literal('agent-sdk'),
     loginMethod: z.literal('api-key'),
-    model: z.string().default('claude-sonnet-4-6').describe('Model'),
+    model: z.string().default('claude-opus-4-7').describe('Model'),
     apiKey: z.string().min(1).describe('Anthropic API key'),
   }),
   models: [
+    { id: 'claude-opus-4-7', label: 'Claude Opus 4.7' },
     { id: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
     { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
     { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
@@ -140,16 +149,81 @@ export const MINIMAX: PresetDef = {
   description: 'MiniMax models via Claude Agent SDK (Anthropic-compatible)',
   category: 'third-party',
   defaultName: 'MiniMax',
-  hint: 'Get your API key at minimaxi.com',
+  hint: 'China console: minimaxi.com — International console: minimax.io. API keys are region-locked.',
   zodSchema: z.object({
     backend: z.literal('agent-sdk'),
     loginMethod: z.literal('api-key'),
-    baseUrl: z.literal('https://api.minimaxi.com/anthropic').describe('MiniMax API endpoint'),
+    baseUrl: z.string().default('https://api.minimaxi.com/anthropic').describe('API endpoint'),
     model: z.string().default('MiniMax-M2.7').describe('Model'),
     apiKey: z.string().min(1).describe('MiniMax API key'),
   }),
+  endpoints: [
+    { id: 'https://api.minimaxi.com/anthropic', label: 'China (minimaxi.com)' },
+    { id: 'https://api.minimax.io/anthropic', label: 'International (minimax.io)' },
+  ],
   models: [
     { id: 'MiniMax-M2.7', label: 'MiniMax M2.7' },
+  ],
+  writeOnlyFields: ['apiKey'],
+}
+
+// ==================== Third-party: GLM (Zhipu) ====================
+
+export const GLM: PresetDef = {
+  id: 'glm',
+  label: 'GLM (Zhipu)',
+  description: 'Zhipu GLM models via Claude Agent SDK (Anthropic-compatible)',
+  category: 'third-party',
+  defaultName: 'GLM',
+  hint: 'China console: bigmodel.cn — International console: z.ai. API keys are region-locked. Latest GLM 5.1 is China-only for now.',
+  zodSchema: z.object({
+    backend: z.literal('agent-sdk'),
+    loginMethod: z.literal('api-key'),
+    baseUrl: z.string().default('https://open.bigmodel.cn/api/anthropic').describe('API endpoint'),
+    model: z.string().default('glm-4.7').describe('Model'),
+    apiKey: z.string().min(1).describe('GLM API key'),
+  }),
+  endpoints: [
+    { id: 'https://open.bigmodel.cn/api/anthropic', label: 'China (bigmodel.cn)' },
+    { id: 'https://api.z.ai/api/anthropic', label: 'International (z.ai)' },
+  ],
+  models: [
+    { id: 'glm-5.1', label: 'GLM 5.1 (China only)' },
+    { id: 'glm-4.7', label: 'GLM 4.7' },
+    { id: 'glm-4.6', label: 'GLM 4.6 — 200K (China only)' },
+    { id: 'glm-4.5-air', label: 'GLM 4.5 Air' },
+  ],
+  writeOnlyFields: ['apiKey'],
+}
+
+// ==================== Third-party: Kimi (Moonshot) ====================
+
+// Moonshot officially pushes OpenAI Chat Completions as the primary integration
+// path; we route via their secondary Anthropic-compat endpoint
+// (api.moonshot.*/anthropic) to stay on agent-sdk. Our codex backend speaks
+// the OpenAI Responses API, which Moonshot's direct endpoints do not
+// implement, so codex isn't a viable alternative here.
+export const KIMI: PresetDef = {
+  id: 'kimi',
+  label: 'Kimi (Moonshot)',
+  description: 'Moonshot Kimi models via Claude Agent SDK (Anthropic-compatible)',
+  category: 'third-party',
+  defaultName: 'Kimi',
+  hint: 'China console: platform.moonshot.cn — International console: platform.moonshot.ai. API keys are region-locked.',
+  zodSchema: z.object({
+    backend: z.literal('agent-sdk'),
+    loginMethod: z.literal('api-key'),
+    baseUrl: z.string().default('https://api.moonshot.cn/anthropic').describe('API endpoint'),
+    model: z.string().default('kimi-k2.6').describe('Model'),
+    apiKey: z.string().min(1).describe('Moonshot API key'),
+  }),
+  endpoints: [
+    { id: 'https://api.moonshot.cn/anthropic', label: 'China (moonshot.cn)' },
+    { id: 'https://api.moonshot.ai/anthropic', label: 'International (moonshot.ai)' },
+  ],
+  models: [
+    { id: 'kimi-k2.6', label: 'Kimi K2.6' },
+    { id: 'kimi-k2.5', label: 'Kimi K2.5' },
   ],
   writeOnlyFields: ['apiKey'],
 }
@@ -182,5 +256,7 @@ export const PRESET_CATALOG: PresetDef[] = [
   CODEX_API,
   GEMINI,
   MINIMAX,
+  GLM,
+  KIMI,
   CUSTOM,
 ]

@@ -4,6 +4,7 @@ import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { resolve } from 'node:path'
 import type { Plugin, EngineContext } from '../../core/types.js'
+import type { ProducerHandle } from '../../core/producer.js'
 import { SessionStore } from '../../core/session.js'
 import { WebConnector } from './web-connector.js'
 import { readWebSubchannels } from '../../core/config.js'
@@ -11,8 +12,11 @@ import { createChatRoutes, createMediaRoutes, type SSEClient } from './routes/ch
 import { createChannelsRoutes } from './routes/channels.js'
 import { createConfigRoutes, createMarketDataRoutes } from './routes/config.js'
 import { createEventsRoutes } from './routes/events.js'
+import { createTopologyRoutes } from './routes/topology.js'
 import { createCronRoutes } from './routes/cron.js'
 import { createHeartbeatRoutes } from './routes/heartbeat.js'
+import { createDiaryRoutes } from './routes/diary.js'
+import { createBrainRoutes } from './routes/brain.js'
 import { createTradingRoutes } from './routes/trading.js'
 import { createTradingConfigRoutes } from './routes/trading-config.js'
 import { createDevRoutes } from './routes/dev.js'
@@ -20,6 +24,9 @@ import { createToolsRoutes } from './routes/tools.js'
 import { createAgentStatusRoutes } from './routes/agent-status.js'
 import { createPersonaRoutes } from './routes/persona.js'
 import { createNewsRoutes } from './routes/news.js'
+import { createMarketRoutes } from './routes/market.js'
+import { mountOpenTypeBB } from '../../server/opentypebb.js'
+import { buildSDKCredentials } from '../../domain/market-data/credential-map.js'
 
 export interface WebConfig {
   port: number
@@ -31,6 +38,8 @@ export class WebPlugin implements Plugin {
   /** SSE clients grouped by channel ID. Default channel: 'default'. */
   private sseByChannel = new Map<string, Map<string, SSEClient>>()
   private unregisterConnector?: () => void
+  private chatProducer?: ProducerHandle<readonly ['message.received', 'message.sent']>
+  private ingestProducer?: ProducerHandle<readonly ['task.requested']>
 
   constructor(private config: WebConfig) {}
 
@@ -69,8 +78,22 @@ export class WebPlugin implements Plugin {
 
     app.use('/api/*', cors())
 
+    // ==================== Producers ====================
+    // web-chat: emits message.received/sent from the Hono chat routes
+    this.chatProducer = ctx.listenerRegistry.declareProducer({
+      name: 'web-chat',
+      emits: ['message.received', 'message.sent'] as const,
+    })
+    // webhook-ingest: POST /api/events/ingest — enumerates its concrete emits so
+    // each external type shows up on the Flow graph as a real injection edge.
+    // Extend this tuple when adding new `external: true` event types.
+    this.ingestProducer = ctx.listenerRegistry.declareProducer({
+      name: 'webhook-ingest',
+      emits: ['task.requested'] as const,
+    })
+
     // ==================== Mount route modules ====================
-    app.route('/api/chat', createChatRoutes({ ctx, sessions, sseByChannel: this.sseByChannel }))
+    app.route('/api/chat', createChatRoutes({ ctx, sessions, sseByChannel: this.sseByChannel, producer: this.chatProducer }))
     app.route('/api/channels', createChannelsRoutes({ sessions, sseByChannel: this.sseByChannel }))
     app.route('/api/media', createMediaRoutes())
     app.route('/api/config', createConfigRoutes({
@@ -78,16 +101,29 @@ export class WebPlugin implements Plugin {
       onConnectorsChange: async () => { await ctx.reconnectConnectors() },
     }))
     app.route('/api/market-data', createMarketDataRoutes(ctx))
-    app.route('/api/events', createEventsRoutes(ctx))
+    app.route('/api/events', createEventsRoutes({ ctx, ingestProducer: this.ingestProducer }))
+    app.route('/api/topology', createTopologyRoutes(ctx))
     app.route('/api/cron', createCronRoutes(ctx))
     app.route('/api/heartbeat', createHeartbeatRoutes(ctx))
+    app.route('/api/diary', createDiaryRoutes(ctx))
+    app.route('/api/brain', createBrainRoutes())
     app.route('/api/trading/config', createTradingConfigRoutes(ctx))
     app.route('/api/trading', createTradingRoutes(ctx))
     app.route('/api/dev', createDevRoutes(ctx.connectorCenter))
     app.route('/api/tools', createToolsRoutes(ctx.toolCenter))
     app.route('/api/agent-status', createAgentStatusRoutes(ctx))
     app.route('/api/news', createNewsRoutes(ctx))
+    app.route('/api/market', createMarketRoutes(ctx))
     app.route('/api/persona', createPersonaRoutes())
+
+    // ==================== Mount opentypebb (market data HTTP) ====================
+    // opentypebb is Alice's first-class market-data package; its router is
+    // merged into this app so UI and external consumers hit a single port.
+    mountOpenTypeBB(app, ctx.bbEngine, {
+      basePath: '/api/market-data-v1',
+      defaultCredentials: buildSDKCredentials(ctx.config.marketData.providerKeys),
+      defaultProviders: ctx.config.marketData.providers,
+    })
 
     // ==================== Serve UI (Vite build output) ====================
     const uiRoot = resolve('dist/ui')
@@ -109,6 +145,10 @@ export class WebPlugin implements Plugin {
   async stop() {
     this.sseByChannel.clear()
     this.unregisterConnector?.()
+    this.chatProducer?.dispose()
+    this.chatProducer = undefined
+    this.ingestProducer?.dispose()
+    this.ingestProducer = undefined
     this.server?.close()
   }
 }

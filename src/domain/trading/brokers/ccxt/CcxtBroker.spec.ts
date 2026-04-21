@@ -211,7 +211,7 @@ describe('CcxtBroker — placeOrder notional', () => {
     const order = new Order()
     order.action = 'BUY'
     order.orderType = 'MKT'
-    order.cashQty = 500 // $500 worth of BTC
+    order.cashQty = new Decimal(500) // $500 worth of BTC
 
     const result = await acc.placeOrder(contract, order)
 
@@ -542,7 +542,7 @@ describe('CcxtBroker — placeOrder qty-based', () => {
     order.action = 'SELL'
     order.orderType = 'LMT'
     order.totalQuantity = new Decimal(1.0)
-    order.lmtPrice = 65000
+    order.lmtPrice = new Decimal(65000)
 
     const result = await acc.placeOrder(makeContract(), order)
     expect(result.success).toBe(true)
@@ -588,7 +588,7 @@ describe('CcxtBroker — modifyOrder', () => {
 
     const changes = new Order()
     changes.totalQuantity = new Decimal(0.75)
-    changes.lmtPrice = 62000
+    changes.lmtPrice = new Decimal(62000)
     changes.orderType = 'LMT'
 
     const result = await acc.modifyOrder('ord-100', changes)
@@ -649,7 +649,7 @@ describe('CcxtBroker — modifyOrder field forwarding', () => {
     })
     ;(acc as any).exchange.editOrder = vi.fn().mockResolvedValue({ id: 'ord-300-edited', status: 'open' })
 
-    const changes: Partial<Order> = { auxPrice: 1850 }
+    const changes: Partial<Order> = { auxPrice: new Decimal(1850) }
 
     await acc.modifyOrder('ord-300', changes)
     const call = (acc as any).exchange.editOrder.mock.calls[0]

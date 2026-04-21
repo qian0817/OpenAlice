@@ -21,7 +21,7 @@ const legacyLoginMethodSchema = z.enum(['api-key', 'claudeai', 'codex-oauth'])
 export const aiProviderLegacySchema = z.object({
   backend: z.enum(['claude-code', 'vercel-ai-sdk', 'agent-sdk', 'codex']).default('claude-code'),
   provider: z.string().default('anthropic'),
-  model: z.string().default('claude-sonnet-4-6'),
+  model: z.string().default('claude-opus-4-7'),
   baseUrl: z.string().min(1).optional(),
   loginMethod: legacyLoginMethodSchema.default('api-key'),
   apiKeys: z.object({
@@ -51,7 +51,7 @@ const baseProfileFields = {
 export const agentSdkProfileSchema = z.object({
   ...baseProfileFields,
   backend: z.literal('agent-sdk'),
-  model: z.string().default('claude-sonnet-4-6'),
+  model: z.string().default('claude-opus-4-7'),
   loginMethod: z.enum(['api-key', 'claudeai']).default('api-key'),
 })
 
@@ -66,7 +66,7 @@ export const vercelProfileSchema = z.object({
   ...baseProfileFields,
   backend: z.literal('vercel-ai-sdk'),
   provider: z.string().default('anthropic'),
-  model: z.string().default('claude-sonnet-4-6'),
+  model: z.string().default('claude-opus-4-7'),
 })
 
 export const profileSchema = z.discriminatedUnion('backend', [
@@ -81,7 +81,7 @@ export const aiProviderSchema = z.object({
     z.string(),
     profileSchema,
   ).default({
-    default: { backend: 'agent-sdk', model: 'claude-sonnet-4-6', loginMethod: 'claudeai' },
+    default: { backend: 'agent-sdk', model: 'claude-opus-4-7', loginMethod: 'claudeai' },
   }),
   activeProfile: z.string().default('default'),
 })
@@ -181,10 +181,6 @@ const marketDataSchema = z.object({
     biztoc: z.string().optional(),
   }).default({}),
   backend: z.enum(['typebb-sdk', 'openbb-api']).default('typebb-sdk'),
-  apiServer: z.object({
-    enabled: z.boolean().default(true),
-    port: z.number().int().min(1024).max(65535).default(6901),
-  }).default({ enabled: true, port: 6901 }),
 })
 
 const chinaMarketDataSchema = z.object({
@@ -240,6 +236,23 @@ export const toolsSchema = z.object({
   disabled: z.array(z.string()).default([]),
 })
 
+const webhookTokenSchema = z.object({
+  /** Human-readable label (used in logs / admin UI; not a secret). */
+  id: z.string().min(1),
+  /** The bearer secret. Opaque string — treat as high-entropy. */
+  token: z.string().min(1),
+  /** Epoch ms when created. Metadata only, used for rotation. */
+  createdAt: z.number().int().nonnegative().default(() => Date.now()),
+})
+
+export const webhookSchema = z.object({
+  /** List of accepted bearer tokens for POST /api/events/ingest. Empty = endpoint rejects everything (503). */
+  tokens: z.array(webhookTokenSchema).default([]),
+})
+
+export type WebhookToken = z.infer<typeof webhookTokenSchema>
+export type WebhookConfig = z.infer<typeof webhookSchema>
+
 export const webSubchannelSchema = z.object({
   /** URL-safe identifier. Used as session path segment: data/sessions/web/{id}.jsonl */
   id: z.string().regex(/^[a-z0-9-_]+$/, 'id must be lowercase alphanumeric with hyphens/underscores'),
@@ -292,6 +305,7 @@ export type Config = {
   connectors: z.infer<typeof connectorsSchema>
   news: z.infer<typeof newsCollectorSchema>
   tools: z.infer<typeof toolsSchema>
+  webhook: z.infer<typeof webhookSchema>
 }
 
 // ==================== Loader ====================
@@ -324,7 +338,7 @@ async function parseAndSeed<T>(filename: string, schema: z.ZodType<T>, raw: unkn
 }
 
 export async function loadConfig(): Promise<Config> {
-  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'compaction.json', 'ai-provider-manager.json', 'heartbeat.json', 'snapshot.json', 'connectors.json', 'news.json', 'tools.json', 'china-market-data.json'] as const
+  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'compaction.json', 'ai-provider-manager.json', 'heartbeat.json', 'snapshot.json', 'connectors.json', 'news.json', 'tools.json', 'china-market-data.json', 'webhook.json'] as const
   const raws = await Promise.all(files.map((f) => loadJsonFile(f)))
 
   // TODO: remove all migration blocks before v1.0 — no stable release yet, breaking changes are fine
@@ -415,7 +429,7 @@ export async function loadConfig(): Promise<Config> {
         default: {
           backend: 'agent-sdk',
           label: 'Default',
-          model: (oldModel?.model as string) ?? 'claude-sonnet-4-6',
+          model: (oldModel?.model as string) ?? 'claude-opus-4-7',
           loginMethod: 'claudeai',
           provider: (oldModel?.provider as string) ?? 'anthropic',
         },
@@ -490,6 +504,7 @@ export async function loadConfig(): Promise<Config> {
     connectors:      await parseAndSeed(files[9], connectorsSchema, raws[9]),
     news:            await parseAndSeed(files[10], newsCollectorSchema, raws[10]),
     tools:           await parseAndSeed(files[11], toolsSchema, raws[11]),
+    webhook:         await parseAndSeed(files[12], webhookSchema, raws[12]),
     chinaMarketData: await parseAndSeed(files[12], chinaMarketDataSchema, raws[12]),
   }
 }
@@ -589,6 +604,17 @@ export async function readConnectorsConfig() {
   }
 }
 
+/** Read webhook config from disk (called per-request so token rotation
+ *  takes effect without restart). */
+export async function readWebhookConfig() {
+  try {
+    const raw = JSON.parse(await readFile(resolve(CONFIG_DIR, 'webhook.json'), 'utf-8'))
+    return webhookSchema.parse(raw)
+  } catch {
+    return webhookSchema.parse({})
+  }
+}
+
 // ==================== Profile Helpers ====================
 
 /** Resolved profile — all fields needed by providers. */
@@ -661,6 +687,7 @@ const sectionSchemas: Record<ConfigSection, z.ZodTypeAny> = {
   connectors: connectorsSchema,
   news: newsCollectorSchema,
   tools: toolsSchema,
+  webhook: webhookSchema,
 }
 
 const sectionFiles: Record<ConfigSection, string> = {
@@ -677,6 +704,7 @@ const sectionFiles: Record<ConfigSection, string> = {
   connectors: 'connectors.json',
   news: 'news.json',
   tools: 'tools.json',
+  webhook: 'webhook.json',
 }
 
 /** All valid config section names (derived from sectionSchemas). */

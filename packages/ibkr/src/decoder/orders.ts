@@ -216,8 +216,8 @@ function decodeOrderFromProto(orderId: number, cp: ContractProto, op: OrderProto
   if (op.action !== undefined) order.action = op.action
   if (op.totalQuantity !== undefined) order.totalQuantity = new Decimal(op.totalQuantity)
   if (op.orderType !== undefined) order.orderType = op.orderType
-  if (op.lmtPrice !== undefined) order.lmtPrice = op.lmtPrice
-  if (op.auxPrice !== undefined) order.auxPrice = op.auxPrice
+  if (op.lmtPrice !== undefined) order.lmtPrice = new Decimal(op.lmtPrice)
+  if (op.auxPrice !== undefined) order.auxPrice = new Decimal(op.auxPrice)
   if (op.tif !== undefined) order.tif = op.tif
   if (op.ocaGroup !== undefined) order.ocaGroup = op.ocaGroup
   if (op.account !== undefined) order.account = op.account
@@ -268,8 +268,8 @@ function decodeOrderFromProto(orderId: number, cp: ContractProto, op: OrderProto
   if (op.deltaNeutralDesignatedLocation !== undefined) order.deltaNeutralDesignatedLocation = op.deltaNeutralDesignatedLocation
   if (op.continuousUpdate !== undefined) order.continuousUpdate = op.continuousUpdate
   if (op.referencePriceType !== undefined) order.referencePriceType = op.referencePriceType
-  if (op.trailStopPrice !== undefined) order.trailStopPrice = op.trailStopPrice
-  if (op.trailingPercent !== undefined) order.trailingPercent = op.trailingPercent
+  if (op.trailStopPrice !== undefined) order.trailStopPrice = new Decimal(op.trailStopPrice)
+  if (op.trailingPercent !== undefined) order.trailingPercent = new Decimal(op.trailingPercent)
 
   // order combo legs
   const orderComboLegs = decodeOrderComboLegsFromProto(cp)
@@ -328,7 +328,7 @@ function decodeOrderFromProto(orderId: number, cp: ContractProto, op: OrderProto
   const sdt = decodeSoftDollarTierFromProto(op)
   if (sdt) order.softDollarTier = sdt
 
-  if (op.cashQty !== undefined) order.cashQty = op.cashQty
+  if (op.cashQty !== undefined) order.cashQty = new Decimal(op.cashQty)
   if (op.dontUseAutoPriceForHedge !== undefined) order.dontUseAutoPriceForHedge = op.dontUseAutoPriceForHedge
   if (op.isOmsContainer !== undefined) order.isOmsContainer = op.isOmsContainer
   if (op.discretionaryUpToLimitPrice !== undefined) order.discretionaryUpToLimitPrice = op.discretionaryUpToLimitPrice

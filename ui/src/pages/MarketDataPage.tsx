@@ -86,7 +86,6 @@ export function MarketDataPage() {
 
   const dataBackend = (config.backend as string) || 'typebb-sdk'
   const apiUrl = (config.apiUrl as string) || 'http://localhost:6900'
-  const apiServer = (config.apiServer as { enabled: boolean; port: number } | undefined) ?? { enabled: false, port: 6901 }
   const providers = (config.providers ?? { equity: 'yfinance', crypto: 'yfinance', currency: 'yfinance', commodity: 'yfinance' }) as Record<string, string>
   const providerKeys = (config.providerKeys ?? {}) as Record<string, string>
 
@@ -131,14 +130,12 @@ export function MarketDataPage() {
             onKeyChange={handleKeyChange}
           />
 
-          {/* Advanced — backend switch + embedded server */}
+          {/* Advanced — backend switch */}
           <AdvancedSection
             backend={dataBackend}
             apiUrl={apiUrl}
-            apiServer={apiServer}
             onBackendChange={(backend) => updateConfigImmediate({ backend })}
             onApiUrlChange={(url) => updateConfig({ apiUrl: url })}
-            onApiServerChange={(server) => updateConfigImmediate({ apiServer: server })}
           />
         </div>
         {loadError && <p className="text-[13px] text-red mt-4 max-w-[880px] mx-auto">Failed to load configuration.</p>}
@@ -257,17 +254,13 @@ function ApiKeysSection({
 function AdvancedSection({
   backend,
   apiUrl,
-  apiServer,
   onBackendChange,
   onApiUrlChange,
-  onApiServerChange,
 }: {
   backend: string
   apiUrl: string
-  apiServer: { enabled: boolean; port: number }
   onBackendChange: (backend: string) => void
   onApiUrlChange: (url: string) => void
-  onApiServerChange: (server: { enabled: boolean; port: number }) => void
 }) {
   const [expanded, setExpanded] = useState(false)
 
@@ -281,7 +274,7 @@ function AdvancedSection({
         <span className="text-[11px] text-text-muted/50">{expanded ? '\u25BC' : '\u25B6'}</span>
       </button>
       {!expanded && (
-        <p className="text-[13px] text-text-muted/70">Data backend, embedded API server.</p>
+        <p className="text-[13px] text-text-muted/70">Data backend selection.</p>
       )}
       {expanded && (
         <div className="space-y-6 mt-4">
@@ -321,39 +314,6 @@ function AdvancedSection({
                   />
                 </Field>
               </div>
-            )}
-          </div>
-
-          {/* Embedded API Server */}
-          <div>
-            <p className="text-[13px] font-medium text-text mb-2">Embedded API Server</p>
-            <p className="text-[12px] text-text-muted/70 mb-3">
-              Expose an OpenBB-compatible HTTP API from Alice. Other services can connect to query market data.
-            </p>
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <p className="text-[13px] text-text">Enable HTTP server</p>
-                <p className="text-[12px] text-text-muted/60 mt-0.5">
-                  Serves at <span className="font-mono text-[11px]">http://localhost:{apiServer.port}</span>
-                </p>
-              </div>
-              <Toggle
-                size="sm"
-                checked={apiServer.enabled}
-                onChange={(v) => onApiServerChange({ ...apiServer, enabled: v })}
-              />
-            </div>
-            {apiServer.enabled && (
-              <Field label="Port">
-                <input
-                  className={`${inputClass} w-28`}
-                  type="number"
-                  min={1024}
-                  max={65535}
-                  value={apiServer.port}
-                  onChange={(e) => onApiServerChange({ ...apiServer, port: Number(e.target.value) || 6901 })}
-                />
-              </Field>
             )}
           </div>
         </div>

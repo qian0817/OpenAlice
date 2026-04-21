@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import Decimal from 'decimal.js'
-import { Contract, Order, UNSET_DOUBLE, UNSET_DECIMAL } from '@traderalice/ibkr'
+import { Contract, Order, UNSET_DECIMAL } from '@traderalice/ibkr'
 import { MaxPositionSizeGuard } from './max-position-size.js'
 import { CooldownGuard } from './cooldown.js'
 import { SymbolWhitelistGuard } from './symbol-whitelist.js'
@@ -27,7 +27,7 @@ function makePlaceOrderOp(overrides: {
   order.orderType = overrides.orderType ?? 'MKT'
   order.totalQuantity = overrides.totalQuantity ?? new Decimal(10)
   if (overrides.cashQty != null) {
-    order.cashQty = overrides.cashQty
+    order.cashQty = new Decimal(overrides.cashQty)
   }
   return { action: 'placeOrder', contract, order }
 }

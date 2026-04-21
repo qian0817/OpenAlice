@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js'
-import { UNSET_DOUBLE, UNSET_DECIMAL } from '@traderalice/ibkr'
+import { UNSET_DECIMAL } from '@traderalice/ibkr'
 import type { OperationGuard, GuardContext } from './types.js'
 
 const DEFAULT_MAX_PERCENT = 25
@@ -23,12 +23,12 @@ export class MaxPositionSizeGuard implements OperationGuard {
 
     // Estimate added value from IBKR Order fields
     const { order } = operation
-    const cashQty = order.cashQty !== UNSET_DOUBLE ? order.cashQty : undefined
+    const cashQty = !order.cashQty.equals(UNSET_DECIMAL) ? order.cashQty : undefined
     const qty = !order.totalQuantity.equals(UNSET_DECIMAL) ? order.totalQuantity : undefined
 
     let addedValue = new Decimal(0)
-    if (cashQty && cashQty > 0) {
-      addedValue = new Decimal(cashQty)
+    if (cashQty && cashQty.gt(0)) {
+      addedValue = cashQty
     } else if (qty && existing) {
       addedValue = qty.mul(existing.marketPrice)
     }

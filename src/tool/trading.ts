@@ -9,7 +9,7 @@
 import { tool, type Tool } from 'ai'
 import { z } from 'zod'
 import Decimal from 'decimal.js'
-import { Contract, UNSET_DOUBLE, UNSET_DECIMAL } from '@traderalice/ibkr'
+import { Contract, UNSET_DECIMAL } from '@traderalice/ibkr'
 import type { AccountManager } from '@/domain/trading/account-manager.js'
 import { BrokerError, type OpenOrder } from '@/domain/trading/brokers/types.js'
 import type { FxService } from '@/domain/trading/fx-service.js'
@@ -38,12 +38,12 @@ function summarizeOrder(o: OpenOrder, source: string, stringOrderId?: string) {
     symbol: o.contract.symbol || o.contract.localSymbol || '',
     action: order.action,
     orderType: order.orderType,
-    totalQuantity: order.totalQuantity.equals(UNSET_DECIMAL) ? '0' : order.totalQuantity.toString(),
+    totalQuantity: order.totalQuantity.equals(UNSET_DECIMAL) ? '0' : order.totalQuantity.toFixed(),
     status: o.orderState.status,
-    ...(order.lmtPrice !== UNSET_DOUBLE && { lmtPrice: order.lmtPrice }),
-    ...(order.auxPrice !== UNSET_DOUBLE && { auxPrice: order.auxPrice }),
-    ...(order.trailStopPrice !== UNSET_DOUBLE && { trailStopPrice: order.trailStopPrice }),
-    ...(order.trailingPercent !== UNSET_DOUBLE && { trailingPercent: order.trailingPercent }),
+    ...(!order.lmtPrice.equals(UNSET_DECIMAL) && { lmtPrice: order.lmtPrice.toFixed() }),
+    ...(!order.auxPrice.equals(UNSET_DECIMAL) && { auxPrice: order.auxPrice.toFixed() }),
+    ...(!order.trailStopPrice.equals(UNSET_DECIMAL) && { trailStopPrice: order.trailStopPrice.toFixed() }),
+    ...(!order.trailingPercent.equals(UNSET_DECIMAL) && { trailingPercent: order.trailingPercent.toFixed() }),
     ...(order.tif && { tif: order.tif }),
     ...(!order.filledQuantity.equals(UNSET_DECIMAL) && { filledQuantity: order.filledQuantity.toString() }),
     ...(o.avgFillPrice != null && { avgFillPrice: o.avgFillPrice }),
@@ -60,6 +60,24 @@ const sourceDesc = (required: boolean, extra?: string) => {
     : ' Optional — omit to query all accounts.'
   return base + req + (extra ? ` ${extra}` : '')
 }
+
+/**
+ * Numeric field that accepts either a JS number or a decimal string.
+ * String form preserves precision beyond JS double (crypto satoshi-scale).
+ * Internal pipeline wraps to Decimal regardless.
+ */
+const positiveNumeric = z
+  .union([z.number(), z.string()])
+  .refine(
+    (v) => {
+      try {
+        return new Decimal(String(v)).gt(0) && new Decimal(String(v)).isFinite()
+      } catch {
+        return false
+      }
+    },
+    { message: 'must be a positive number or positive numeric string' },
+  )
 
 export function createTradingTools(manager: AccountManager, fxService?: FxService): Record<string, Tool> {
   return {
@@ -346,12 +364,12 @@ Optional: attach takeProfit and/or stopLoss for automatic exit orders.`,
         symbol: z.string().optional().describe('Human-readable symbol (optional, for display only)'),
         action: z.enum(['BUY', 'SELL']).describe('Order direction'),
         orderType: z.enum(['MKT', 'LMT', 'STP', 'STP LMT', 'TRAIL', 'TRAIL LIMIT', 'MOC']).describe('Order type'),
-        totalQuantity: z.number().positive().optional().describe('Number of shares/contracts (mutually exclusive with cashQty)'),
-        cashQty: z.number().positive().optional().describe('Notional dollar amount (mutually exclusive with totalQuantity)'),
-        lmtPrice: z.number().positive().optional().describe('Limit price (required for LMT, STP LMT, TRAIL LIMIT)'),
-        auxPrice: z.number().positive().optional().describe('Stop trigger price for STP/STP LMT; trailing offset amount for TRAIL/TRAIL LIMIT'),
-        trailStopPrice: z.number().positive().optional().describe('Initial trailing stop price (TRAIL/TRAIL LIMIT only)'),
-        trailingPercent: z.number().positive().optional().describe('Trailing stop percentage offset (alternative to auxPrice for TRAIL)'),
+        totalQuantity: positiveNumeric.optional().describe('Number of shares/contracts (mutually exclusive with cashQty). Accepts number or decimal string.'),
+        cashQty: positiveNumeric.optional().describe('Notional dollar amount (mutually exclusive with totalQuantity).'),
+        lmtPrice: positiveNumeric.optional().describe('Limit price (required for LMT, STP LMT, TRAIL LIMIT). Accepts number or decimal string for satoshi-scale prices.'),
+        auxPrice: positiveNumeric.optional().describe('Stop trigger price for STP/STP LMT; trailing offset amount for TRAIL/TRAIL LIMIT.'),
+        trailStopPrice: positiveNumeric.optional().describe('Initial trailing stop price (TRAIL/TRAIL LIMIT only).'),
+        trailingPercent: positiveNumeric.optional().describe('Trailing stop percentage offset (alternative to auxPrice for TRAIL).'),
         tif: z.enum(['DAY', 'GTC', 'IOC', 'FOK', 'OPG', 'GTD']).default('DAY').describe('Time in force'),
         goodTillDate: z.string().optional().describe('Expiration datetime for GTD orders'),
         outsideRth: z.boolean().optional().describe('Allow execution outside regular trading hours'),
@@ -373,11 +391,11 @@ Optional: attach takeProfit and/or stopLoss for automatic exit orders.`,
       inputSchema: z.object({
         source: z.string().describe(sourceDesc(true)),
         orderId: z.string().describe('Order ID to modify'),
-        totalQuantity: z.number().positive().optional().describe('New quantity'),
-        lmtPrice: z.number().positive().optional().describe('New limit price'),
-        auxPrice: z.number().positive().optional().describe('New stop trigger price or trailing offset (depends on order type)'),
-        trailStopPrice: z.number().positive().optional().describe('New initial trailing stop price'),
-        trailingPercent: z.number().positive().optional().describe('New trailing stop percentage'),
+        totalQuantity: positiveNumeric.optional().describe('New quantity. Accepts number or decimal string.'),
+        lmtPrice: positiveNumeric.optional().describe('New limit price. Accepts number or decimal string.'),
+        auxPrice: positiveNumeric.optional().describe('New stop trigger price or trailing offset (depends on order type).'),
+        trailStopPrice: positiveNumeric.optional().describe('New initial trailing stop price.'),
+        trailingPercent: positiveNumeric.optional().describe('New trailing stop percentage.'),
         orderType: z.enum(['MKT', 'LMT', 'STP', 'STP LMT', 'TRAIL', 'TRAIL LIMIT', 'MOC']).optional().describe('New order type'),
         tif: z.enum(['DAY', 'GTC', 'IOC', 'FOK', 'OPG', 'GTD']).optional().describe('New time in force'),
         goodTillDate: z.string().optional().describe('New expiration date'),

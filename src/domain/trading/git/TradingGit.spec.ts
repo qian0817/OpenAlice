@@ -447,6 +447,60 @@ describe('TradingGit', () => {
       expect(log).toHaveLength(1)
       expect(log[0].message).toBe('Buy AAPL')
     })
+
+    it('rehydrates Decimal price fields through JSON round-trip', async () => {
+      const contract = makeContract({ symbol: 'ETH' })
+      const order = new Order()
+      order.action = 'BUY'
+      order.orderType = 'LMT'
+      order.totalQuantity = new Decimal('0.12345678')
+      order.lmtPrice = new Decimal('0.00001234')
+      order.auxPrice = new Decimal('0.3')
+      order.trailStopPrice = new Decimal('145.5')
+      order.trailingPercent = new Decimal('2.5')
+      order.cashQty = new Decimal('1000')
+      git.add({ action: 'placeOrder', contract, order })
+      git.commit('precise eth order')
+      await git.push()
+
+      // Simulate persist → reload by going through JSON.
+      const exported = JSON.parse(JSON.stringify(git.exportState()))
+      const restored = TradingGit.restore(exported, config)
+      const commit = restored.show(restored.status().head!)
+      const op = commit!.operations[0] as Extract<Operation, { action: 'placeOrder' }>
+      expect(op.order.totalQuantity).toBeInstanceOf(Decimal)
+      expect(op.order.totalQuantity.toFixed()).toBe('0.12345678')
+      expect(op.order.lmtPrice).toBeInstanceOf(Decimal)
+      expect(op.order.lmtPrice.toFixed()).toBe('0.00001234')
+      expect(op.order.auxPrice.toFixed()).toBe('0.3')
+      expect(op.order.trailStopPrice.toFixed()).toBe('145.5')
+      expect(op.order.trailingPercent.toFixed()).toBe('2.5')
+      expect(op.order.cashQty.toFixed()).toBe('1000')
+    })
+
+    it('rehydrates legacy number-typed price fields to Decimal', async () => {
+      // Simulate an older persisted file where price fields were JSON numbers.
+      const contract = makeContract({ symbol: 'AAPL' })
+      const order = new Order()
+      order.action = 'BUY'
+      order.orderType = 'LMT'
+      order.totalQuantity = new Decimal(10)
+      order.lmtPrice = new Decimal(145.25)
+      git.add({ action: 'placeOrder', contract, order })
+      git.commit('legacy order')
+      await git.push()
+
+      const exported = git.exportState()
+      // Tamper: rewrite lmtPrice as a bare number in the serialised form.
+      const raw = JSON.parse(JSON.stringify(exported)) as typeof exported
+      const committedOp = raw.commits[0].operations[0] as Extract<Operation, { action: 'placeOrder' }>
+      ;(committedOp.order as unknown as { lmtPrice: number }).lmtPrice = 145.25
+      const restored = TradingGit.restore(raw, config)
+      const commit = restored.show(restored.status().head!)
+      const op = commit!.operations[0] as Extract<Operation, { action: 'placeOrder' }>
+      expect(op.order.lmtPrice).toBeInstanceOf(Decimal)
+      expect(op.order.lmtPrice.toNumber()).toBe(145.25)
+    })
   })
 
   // ==================== setCurrentRound ====================

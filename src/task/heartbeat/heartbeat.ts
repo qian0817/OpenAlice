@@ -15,13 +15,18 @@
  *   - heartbeat.error { error, durationMs }
  */
 
-import type { EventLog, EventLogEntry } from '../../core/event-log.js'
+import type { EventLogEntry } from '../../core/event-log.js'
 import type { CronFirePayload } from '../../core/agent-event.js'
 import type { AgentCenter } from '../../core/agent-center.js'
 import { SessionStore } from '../../core/session.js'
 import type { ConnectorCenter } from '../../core/connector-center.js'
 import { writeConfigSection } from '../../core/config.js'
 import type { CronEngine } from '../cron/engine.js'
+import type { Listener, ListenerContext } from '../../core/listener.js'
+import type { ListenerRegistry } from '../../core/listener-registry.js'
+
+const HEARTBEAT_EMITS = ['heartbeat.done', 'heartbeat.skip', 'heartbeat.error'] as const
+type HeartbeatEmits = typeof HEARTBEAT_EMITS
 
 // ==================== Constants ====================
 
@@ -78,8 +83,9 @@ export interface HeartbeatOpts {
   config: HeartbeatConfig
   connectorCenter: ConnectorCenter
   cronEngine: CronEngine
-  eventLog: EventLog
   agentCenter: AgentCenter
+  /** Registry to auto-register the heartbeat listener with. */
+  registry: ListenerRegistry
   /** Optional: inject a session for testing. */
   session?: SessionStore
   /** Inject clock for testing. */
@@ -93,23 +99,28 @@ export interface Heartbeat {
   setEnabled(enabled: boolean): Promise<void>
   /** Current enabled state. */
   isEnabled(): boolean
+  /** Expose the raw listener for direct testing. */
+  readonly listener: Listener<'cron.fire', HeartbeatEmits>
 }
 
 // ==================== Factory ====================
 
 export function createHeartbeat(opts: HeartbeatOpts): Heartbeat {
-  const { config, connectorCenter, cronEngine, eventLog, agentCenter } = opts
+  const { config, connectorCenter, cronEngine, agentCenter, registry } = opts
   const session = opts.session ?? new SessionStore('heartbeat')
   const now = opts.now ?? Date.now
 
-  let unsubscribe: (() => void) | null = null
   let jobId: string | null = null
   let processing = false
   let enabled = config.enabled
+  let registered = false
 
   const dedup = new HeartbeatDedup()
 
-  async function handleFire(entry: EventLogEntry<CronFirePayload>): Promise<void> {
+  async function handleFire(
+    entry: EventLogEntry<CronFirePayload>,
+    ctx: ListenerContext<HeartbeatEmits>,
+  ): Promise<void> {
     const payload = entry.payload
 
     // Only handle our own job
@@ -126,7 +137,7 @@ export function createHeartbeat(opts: HeartbeatOpts): Heartbeat {
       // 1. Active hours guard
       if (!isWithinActiveHours(config.activeHours, now())) {
         console.log('heartbeat: skipped (outside active hours)')
-        await eventLog.append('heartbeat.skip', { reason: 'outside-active-hours' })
+        await ctx.emit('heartbeat.skip', { reason: 'outside-active-hours' })
         return
       }
 
@@ -141,7 +152,7 @@ export function createHeartbeat(opts: HeartbeatOpts): Heartbeat {
 
       if (parsed.status === 'HEARTBEAT_OK') {
         console.log(`heartbeat: HEARTBEAT_OK — ${parsed.reason || 'no reason'} (${durationMs}ms)`)
-        await eventLog.append('heartbeat.skip', {
+        await ctx.emit('heartbeat.skip', {
           reason: 'ack',
           parsedReason: parsed.reason,
         })
@@ -152,14 +163,14 @@ export function createHeartbeat(opts: HeartbeatOpts): Heartbeat {
       const text = parsed.content || result.text
       if (!text.trim()) {
         console.log(`heartbeat: skipped (empty content) (${durationMs}ms)`)
-        await eventLog.append('heartbeat.skip', { reason: 'empty' })
+        await ctx.emit('heartbeat.skip', { reason: 'empty' })
         return
       }
 
       // 4. Dedup
       if (dedup.isDuplicate(text, now())) {
         console.log(`heartbeat: skipped (duplicate) (${durationMs}ms)`)
-        await eventLog.append('heartbeat.skip', { reason: 'duplicate' })
+        await ctx.emit('heartbeat.skip', { reason: 'duplicate' })
         return
       }
 
@@ -179,7 +190,7 @@ export function createHeartbeat(opts: HeartbeatOpts): Heartbeat {
       console.log(`heartbeat: CHAT_YES — delivered=${delivered} (${durationMs}ms)`)
 
       // 6. Done event
-      await eventLog.append('heartbeat.done', {
+      await ctx.emit('heartbeat.done', {
         reply: text,
         reason: parsed.reason,
         durationMs,
@@ -187,7 +198,7 @@ export function createHeartbeat(opts: HeartbeatOpts): Heartbeat {
       })
     } catch (err) {
       console.error('heartbeat: error:', err)
-      await eventLog.append('heartbeat.error', {
+      await ctx.emit('heartbeat.error', {
         error: err instanceof Error ? err.message : String(err),
         durationMs: now() - startMs,
       })
@@ -196,7 +207,14 @@ export function createHeartbeat(opts: HeartbeatOpts): Heartbeat {
     }
   }
 
-  /** Ensure the cron job and event listener exist (idempotent). */
+  const listener: Listener<'cron.fire', HeartbeatEmits> = {
+    name: 'heartbeat',
+    subscribes: 'cron.fire',
+    emits: HEARTBEAT_EMITS,
+    handle: handleFire,
+  }
+
+  /** Ensure the cron job exists and listener is registered (idempotent). */
   async function ensureJobAndListener(): Promise<void> {
     // Idempotent: find existing heartbeat job or create one
     const existing = cronEngine.list().find((j) => j.name === HEARTBEAT_JOB_NAME)
@@ -216,26 +234,27 @@ export function createHeartbeat(opts: HeartbeatOpts): Heartbeat {
       })
     }
 
-    // Subscribe to cron.fire events if not already subscribed
-    if (!unsubscribe) {
-      unsubscribe = eventLog.subscribeType('cron.fire', (entry) => {
-        handleFire(entry).catch((err) => {
-          console.error('heartbeat: unhandled error:', err)
-        })
-      })
+    // Register listener exactly once
+    if (!registered) {
+      registry.register(listener)
+      registered = true
     }
   }
 
   return {
+    listener,
     async start() {
       // Always register job + listener (even if disabled) so setEnabled can toggle later
       await ensureJobAndListener()
     },
 
     stop() {
-      unsubscribe?.()
-      unsubscribe = null
-      // Don't delete the cron job — it persists for restart recovery
+      // Unregister the listener so a subsequent start() re-registers cleanly.
+      // Don't delete the cron job — it persists for restart recovery.
+      if (registered) {
+        registry.unregister(listener.name)
+        registered = false
+      }
     },
 
     async setEnabled(newEnabled: boolean) {

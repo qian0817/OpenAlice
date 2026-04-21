@@ -102,17 +102,20 @@ export class OrderDecoder {
 
   decodeLmtPrice(fields: Iterator<string>): void {
     if (this.version < 29) {
-      this.order.lmtPrice = decodeFloat(fields)
+      // Pre-v29: empty wire field meant 0 (not unset). Preserve that.
+      const raw = decodeDecimal(fields)
+      this.order.lmtPrice = raw.equals(UNSET_DECIMAL) ? new Decimal(0) : raw
     } else {
-      this.order.lmtPrice = decodeFloat(fields, SHOW_UNSET)
+      this.order.lmtPrice = decodeDecimal(fields)
     }
   }
 
   decodeAuxPrice(fields: Iterator<string>): void {
     if (this.version < 30) {
-      this.order.auxPrice = decodeFloat(fields)
+      const raw = decodeDecimal(fields)
+      this.order.auxPrice = raw.equals(UNSET_DECIMAL) ? new Decimal(0) : raw
     } else {
-      this.order.auxPrice = decodeFloat(fields, SHOW_UNSET)
+      this.order.auxPrice = decodeDecimal(fields)
     }
   }
 
@@ -297,9 +300,9 @@ export class OrderDecoder {
   }
 
   decodeTrailParams(fields: Iterator<string>): void {
-    this.order.trailStopPrice = decodeFloat(fields, SHOW_UNSET)
+    this.order.trailStopPrice = decodeDecimal(fields)
     if (this.version >= 30) {
-      this.order.trailingPercent = decodeFloat(fields, SHOW_UNSET)
+      this.order.trailingPercent = decodeDecimal(fields)
     }
   }
 
@@ -555,7 +558,8 @@ export class OrderDecoder {
   }
 
   decodeStopPriceAndLmtPriceOffset(fields: Iterator<string>): void {
-    this.order.trailStopPrice = decodeFloat(fields)
+    const raw = decodeDecimal(fields)
+    this.order.trailStopPrice = raw.equals(UNSET_DECIMAL) ? new Decimal(0) : raw
     this.order.lmtPriceOffset = decodeFloat(fields)
   }
 
@@ -570,7 +574,7 @@ export class OrderDecoder {
 
   decodeCashQty(fields: Iterator<string>): void {
     if (this.serverVersion >= MIN_SERVER_VER_CASH_QTY) {
-      this.order.cashQty = decodeFloat(fields)
+      this.order.cashQty = decodeDecimal(fields)
     }
   }
 

@@ -228,7 +228,18 @@ export async function getHistoricalOhlc(
     baseUrl += 'historical-chart/1hour?'
   }
 
-  const queryParams = { ...query }
+  // FMP's historical endpoints want `from` / `to`, not the canonical
+  // `start_date` / `end_date`. Rename before serializing — otherwise FMP
+  // silently ignores the range and returns its default 5-year window.
+  const queryParams: Record<string, unknown> = { ...query }
+  if (queryParams.start_date != null) {
+    queryParams.from = queryParams.start_date
+    delete queryParams.start_date
+  }
+  if (queryParams.end_date != null) {
+    queryParams.to = queryParams.end_date
+    delete queryParams.end_date
+  }
   const excludeKeys = ['symbol', 'adjustment', 'interval']
   const queryStr = getQueryString(queryParams, excludeKeys)
   const symbols = query.symbol.split(',')

@@ -5,17 +5,20 @@
  * Flow:
  *   eventLog 'cron.fire' → agentCenter.askWithSession(payload, session)
  *                         → connectorCenter.notify(reply)
- *                         → eventLog 'cron.done' / 'cron.error'
+ *                         → ctx.emit 'cron.done' / 'cron.error'
  *
  * The listener owns a dedicated SessionStore for cron conversations,
  * independent of user chat sessions (Telegram, Web, etc.).
  */
 
-import type { EventLog, EventLogEntry } from '../../core/event-log.js'
+import type { EventLogEntry } from '../../core/event-log.js'
 import type { CronFirePayload } from '../../core/agent-event.js'
 import type { AgentCenter } from '../../core/agent-center.js'
 import { SessionStore } from '../../core/session.js'
 import type { ConnectorCenter } from '../../core/connector-center.js'
+import type { Listener, ListenerContext } from '../../core/listener.js'
+import type { ListenerRegistry } from '../../core/listener-registry.js'
+
 /** Internal jobs (prefixed with __) have dedicated handlers and should not be routed to the AI. */
 function isInternalJob(name: string): boolean {
   return name.startsWith('__') && name.endsWith('__')
@@ -23,95 +26,108 @@ function isInternalJob(name: string): boolean {
 
 // ==================== Types ====================
 
+const CRON_EMITS = ['cron.done', 'cron.error'] as const
+type CronEmits = typeof CRON_EMITS
+
 export interface CronListenerOpts {
   connectorCenter: ConnectorCenter
-  eventLog: EventLog
   agentCenter: AgentCenter
+  /** Registry to auto-register this listener with. */
+  registry: ListenerRegistry
   /** Optional: inject a session for testing. Otherwise creates a dedicated cron session. */
   session?: SessionStore
 }
 
 export interface CronListener {
-  start(): void
+  /** Register the listener with the registry (idempotent). */
+  start(): Promise<void>
+  /** Unregister the listener from the registry. */
   stop(): void
+  /** Expose the raw Listener object (for testing `handle()` directly). */
+  readonly listener: Listener<'cron.fire', CronEmits>
 }
 
 // ==================== Factory ====================
 
 export function createCronListener(opts: CronListenerOpts): CronListener {
-  const { connectorCenter, eventLog, agentCenter } = opts
+  const { connectorCenter, agentCenter, registry } = opts
   const session = opts.session ?? new SessionStore('cron/default')
 
-  let unsubscribe: (() => void) | null = null
   let processing = false
+  let registered = false
 
-  async function handleFire(entry: EventLogEntry<CronFirePayload>): Promise<void> {
-    const payload = entry.payload
+  const listener: Listener<'cron.fire', CronEmits> = {
+    name: 'cron-router',
+    subscribes: 'cron.fire',
+    emits: CRON_EMITS,
+    async handle(
+      entry: EventLogEntry<CronFirePayload>,
+      ctx: ListenerContext<CronEmits>,
+    ): Promise<void> {
+      const payload = entry.payload
 
-    // Guard: internal jobs (__heartbeat__, __snapshot__, etc.) have dedicated handlers
-    if (isInternalJob(payload.jobName)) return
+      // Guard: internal jobs (__heartbeat__, __snapshot__, etc.) have dedicated handlers
+      if (isInternalJob(payload.jobName)) return
 
-    // Guard: skip if already processing (serial execution)
-    if (processing) {
-      console.warn(`cron-listener: skipping job ${payload.jobId} (already processing)`)
-      return
-    }
-
-    processing = true
-    const startMs = Date.now()
-
-    try {
-      // Ask the AI engine with the cron payload
-      const result = await agentCenter.askWithSession(payload.payload, session, {
-        historyPreamble: `You are operating in the cron job context (session: cron/default, job: ${payload.jobName}). This is an automated cron job execution.`,
-      })
-
-      // Send notification through the last-interacted connector
-      try {
-        await connectorCenter.notify(result.text, {
-          media: result.media,
-          source: 'cron',
-        })
-      } catch (sendErr) {
-        console.warn(`cron-listener: send failed for job ${payload.jobId}:`, sendErr)
+      // Guard: skip if already processing (serial execution)
+      if (processing) {
+        console.warn(`cron-listener: skipping job ${payload.jobId} (already processing)`)
+        return
       }
 
-      // Log success
-      await eventLog.append('cron.done', {
-        jobId: payload.jobId,
-        jobName: payload.jobName,
-        reply: result.text,
-        durationMs: Date.now() - startMs,
-      })
-    } catch (err) {
-      console.error(`cron-listener: error processing job ${payload.jobId}:`, err)
+      processing = true
+      const startMs = Date.now()
 
-      // Log error
-      await eventLog.append('cron.error', {
-        jobId: payload.jobId,
-        jobName: payload.jobName,
-        error: err instanceof Error ? err.message : String(err),
-        durationMs: Date.now() - startMs,
-      })
-    } finally {
-      processing = false
-    }
+      try {
+        // Ask the AI engine with the cron payload
+        const result = await agentCenter.askWithSession(payload.payload, session, {
+          historyPreamble: `You are operating in the cron job context (session: cron/default, job: ${payload.jobName}). This is an automated cron job execution.`,
+        })
+
+        // Send notification through the last-interacted connector
+        try {
+          await connectorCenter.notify(result.text, {
+            media: result.media,
+            source: 'cron',
+          })
+        } catch (sendErr) {
+          console.warn(`cron-listener: send failed for job ${payload.jobId}:`, sendErr)
+        }
+
+        // Log success
+        await ctx.emit('cron.done', {
+          jobId: payload.jobId,
+          jobName: payload.jobName,
+          reply: result.text,
+          durationMs: Date.now() - startMs,
+        })
+      } catch (err) {
+        console.error(`cron-listener: error processing job ${payload.jobId}:`, err)
+
+        await ctx.emit('cron.error', {
+          jobId: payload.jobId,
+          jobName: payload.jobName,
+          error: err instanceof Error ? err.message : String(err),
+          durationMs: Date.now() - startMs,
+        })
+      } finally {
+        processing = false
+      }
+    },
   }
 
   return {
-    start() {
-      if (unsubscribe) return // already started
-      unsubscribe = eventLog.subscribeType('cron.fire', (entry) => {
-        // Fire-and-forget — errors are caught inside handleFire
-        handleFire(entry).catch((err) => {
-          console.error('cron-listener: unhandled error in handleFire:', err)
-        })
-      })
+    listener,
+    async start() {
+      if (registered) return
+      registry.register(listener)
+      registered = true
     },
-
     stop() {
-      unsubscribe?.()
-      unsubscribe = null
+      if (registered) {
+        registry.unregister(listener.name)
+        registered = false
+      }
     },
   }
 }

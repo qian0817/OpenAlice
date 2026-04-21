@@ -10,7 +10,7 @@
 
 import { z } from 'zod'
 import Decimal from 'decimal.js'
-import { Contract, ContractDescription, ContractDetails, Order, OrderState, UNSET_DECIMAL, UNSET_DOUBLE } from '@traderalice/ibkr'
+import { Contract, ContractDescription, ContractDetails, Order, OrderState, UNSET_DECIMAL } from '@traderalice/ibkr'
 import type {
   IBroker,
   AccountCapabilities,
@@ -275,16 +275,16 @@ export class MockBroker implements IBroker {
     if (changes.totalQuantity != null && !changes.totalQuantity.equals(UNSET_DECIMAL)) {
       internal.order.totalQuantity = changes.totalQuantity
     }
-    if (changes.lmtPrice != null && changes.lmtPrice !== UNSET_DOUBLE) {
+    if (changes.lmtPrice != null && !changes.lmtPrice.equals(UNSET_DECIMAL)) {
       internal.order.lmtPrice = changes.lmtPrice
     }
-    if (changes.auxPrice != null && changes.auxPrice !== UNSET_DOUBLE) {
+    if (changes.auxPrice != null && !changes.auxPrice.equals(UNSET_DECIMAL)) {
       internal.order.auxPrice = changes.auxPrice
     }
-    if (changes.trailStopPrice != null && changes.trailStopPrice !== UNSET_DOUBLE) {
+    if (changes.trailStopPrice != null && !changes.trailStopPrice.equals(UNSET_DECIMAL)) {
       internal.order.trailStopPrice = changes.trailStopPrice
     }
-    if (changes.trailingPercent != null && changes.trailingPercent !== UNSET_DOUBLE) {
+    if (changes.trailingPercent != null && !changes.trailingPercent.equals(UNSET_DECIMAL)) {
       internal.order.trailingPercent = changes.trailingPercent
     }
     if (changes.orderType) internal.order.orderType = changes.orderType
@@ -540,8 +540,8 @@ export class MockBroker implements IBroker {
     o.orderType = order.orderType
     o.totalQuantity = order.totalQuantity
     o.tif = order.tif
-    if (order.lmtPrice !== UNSET_DOUBLE) o.lmtPrice = order.lmtPrice
-    if (order.auxPrice !== UNSET_DOUBLE) o.auxPrice = order.auxPrice
+    if (!order.lmtPrice.equals(UNSET_DECIMAL)) o.lmtPrice = order.lmtPrice
+    if (!order.auxPrice.equals(UNSET_DECIMAL)) o.auxPrice = order.auxPrice
     o.orderId = parseInt(orderId.replace('mock-ord-', ''), 10) || 0
     return o
   }

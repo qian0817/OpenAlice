@@ -156,13 +156,17 @@ export class Router {
    * Maps to: AppLoader.add_routers() / RouterLoader in rest_api.py
    *
    * Each command becomes: GET /api/v1/{extension}/{path}?params...
-   *   - Provider is taken from ?provider= query param
-   *   - Credentials from X-OpenBB-Credentials header
+   *   - Provider: explicit `?provider=` query wins; else `resolveProvider(path, basePath)`
+   *     if supplied; else empty string (executor will surface a "provider required" error).
+   *   - Credentials from X-OpenBB-Credentials header, falling back to
+   *     `defaultCredentials` when the header is absent or malformed.
    */
   mountToHono(
     app: Hono,
     executor: QueryExecutor,
     basePath = '/api/v1',
+    defaultCredentials: Record<string, string> | null = null,
+    resolveProvider?: (path: string, basePath: string) => string | undefined,
   ): void {
     const commands = this.getCommandMap(basePath)
 
@@ -176,18 +180,19 @@ export class Router {
           params[key] = coerceQueryValue(value)
         }
 
-        // Extract provider from query params (matches OpenBB behavior)
-        const provider = (params.provider as string) ?? ''
+        // Provider precedence: explicit query > resolver callback > empty string.
+        const queryProvider = (params.provider as string | undefined) ?? ''
+        const provider = queryProvider || resolveProvider?.(path, basePath) || ''
         delete params.provider
 
-        // Parse credentials from header
+        // Parse credentials from header; fall back to defaults when missing.
         const credHeader = c.req.header('X-OpenBB-Credentials')
-        let credentials: Record<string, string> | null = null
+        let credentials: Record<string, string> | null = defaultCredentials
         if (credHeader) {
           try {
             credentials = JSON.parse(credHeader)
           } catch {
-            // Ignore malformed credential header
+            // Malformed header — keep defaults rather than dropping creds.
           }
         }
 

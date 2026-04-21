@@ -10,6 +10,7 @@ import type { UnifiedTradingAccountOptions } from '../UnifiedTradingAccount.js'
 import { MockBroker, makeContract, makePosition, makeOpenOrder } from '../brokers/mock/index.js'
 import { AccountManager } from '../account-manager.js'
 import { createEventLog, type EventLog } from '../../../core/event-log.js'
+import { createListenerRegistry, type ListenerRegistry } from '../../../core/listener-registry.js'
 import { createCronEngine, type CronEngine } from '../../../task/cron/engine.js'
 import { buildSnapshot } from './builder.js'
 import { createSnapshotStore, type SnapshotStore } from './store.js'
@@ -41,7 +42,7 @@ function makeSubmittedOrder(symbol = 'AAPL'): ReturnType<typeof makeOpenOrder> {
   order.action = 'BUY'
   order.orderType = 'LMT'
   order.totalQuantity = new Decimal(5)
-  order.lmtPrice = 150
+  order.lmtPrice = new Decimal(150)
   const orderState = new OrderState()
   orderState.status = 'Submitted'
   return { contract, order, orderState }
@@ -113,7 +114,7 @@ describe('Snapshot Builder', () => {
     order.action = 'BUY'
     order.orderType = 'LMT'
     order.totalQuantity = new Decimal(5)
-    order.lmtPrice = 140
+    order.lmtPrice = new Decimal(140)
     order.tif = 'DAY'
 
     uta.git.add({ action: 'placeOrder', contract, order })
@@ -448,6 +449,7 @@ describe('Snapshot Service', () => {
 
 describe('Snapshot Scheduler', () => {
   let eventLog: EventLog
+  let listenerRegistry: ListenerRegistry
   let cronEngine: CronEngine
   let scheduler: SnapshotScheduler
   let mockService: SnapshotService
@@ -456,7 +458,9 @@ describe('Snapshot Scheduler', () => {
     const logPath = tempPath('jsonl')
     const storePath = tempPath('json')
     eventLog = await createEventLog({ logPath })
-    cronEngine = createCronEngine({ eventLog, storePath })
+    listenerRegistry = createListenerRegistry(eventLog)
+    await listenerRegistry.start()
+    cronEngine = createCronEngine({ registry: listenerRegistry, storePath })
     await cronEngine.start()
 
     mockService = {
@@ -469,7 +473,7 @@ describe('Snapshot Scheduler', () => {
     scheduler = createSnapshotScheduler({
       snapshotService: mockService,
       cronEngine,
-      eventLog,
+      registry: listenerRegistry,
       config: { enabled: true, every: '15m' },
     })
   })
@@ -477,6 +481,7 @@ describe('Snapshot Scheduler', () => {
   afterEach(async () => {
     scheduler?.stop()
     cronEngine.stop()
+    await listenerRegistry.stop()
     await eventLog._resetForTest()
   })
 

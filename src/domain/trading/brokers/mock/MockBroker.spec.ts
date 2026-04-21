@@ -107,7 +107,7 @@ describe('placeOrder', () => {
     order.action = 'BUY'
     order.orderType = 'LMT'
     order.totalQuantity = new Decimal(10)
-    order.lmtPrice = 140
+    order.lmtPrice = new Decimal(140)
 
     const result = await broker.placeOrder(contract, order)
     expect(result.success).toBe(true)
@@ -209,7 +209,7 @@ describe('cancelOrder', () => {
     order.action = 'BUY'
     order.orderType = 'LMT'
     order.totalQuantity = new Decimal(10)
-    order.lmtPrice = 140
+    order.lmtPrice = new Decimal(140)
 
     const placed = await broker.placeOrder(contract, order)
     const cancelled = await broker.cancelOrder(placed.orderId!)
@@ -237,19 +237,19 @@ describe('modifyOrder', () => {
     order.action = 'BUY'
     order.orderType = 'LMT'
     order.totalQuantity = new Decimal(10)
-    order.lmtPrice = 140
+    order.lmtPrice = new Decimal(140)
 
     const placed = await broker.placeOrder(contract, order)
 
     const changes = new Order()
     changes.totalQuantity = new Decimal(20)
-    changes.lmtPrice = 145
+    changes.lmtPrice = new Decimal(145)
     const modified = await broker.modifyOrder(placed.orderId!, changes)
     expect(modified.success).toBe(true)
 
     const brokerOrder = await broker.getOrder(placed.orderId!)
     expect(brokerOrder!.order.totalQuantity.toNumber()).toBe(20)
-    expect(brokerOrder!.order.lmtPrice).toBe(145)
+    expect(brokerOrder!.order.lmtPrice.toNumber()).toBe(145)
   })
 
   it('returns error for unknown order', async () => {
@@ -269,7 +269,7 @@ describe('getOrder', () => {
     order.action = 'BUY'
     order.orderType = 'LMT'
     order.totalQuantity = new Decimal(10)
-    order.lmtPrice = 140
+    order.lmtPrice = new Decimal(140)
 
     const placed = await broker.placeOrder(contract, order)
     const found = await broker.getOrder(placed.orderId!)
@@ -292,7 +292,7 @@ describe('fillPendingOrder', () => {
     order.action = 'BUY'
     order.orderType = 'LMT'
     order.totalQuantity = new Decimal(10)
-    order.lmtPrice = 140
+    order.lmtPrice = new Decimal(140)
 
     const placed = await broker.placeOrder(contract, order)
     broker.fillPendingOrder(placed.orderId!, 139.50)

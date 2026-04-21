@@ -1,14 +1,17 @@
 /**
  * Agent Event Type System — typed event registry with runtime validation.
  *
- * Defines `AgentEventMap` (type → payload mapping) and TypeBox schemas
- * for runtime validation of event payloads. Used by EventLog to enforce
- * type safety on `append()` and `subscribeType()`.
+ * `AgentEvents` is the single source of truth: each event type maps to a
+ * metadata record holding its TypeBox schema, whether it's externally
+ * ingestable, and an optional human-readable description.
+ *
+ * `AgentEventSchemas` and `isExternalEventType` are derived views exposed
+ * for ergonomics and backward compatibility.
  *
  * Adding a new event type:
  *   1. Define its payload interface
  *   2. Add it to `AgentEventMap`
- *   3. Add its TypeBox schema to `AgentEventSchemas`
+ *   3. Add an entry to `AgentEvents` with schema + (optional) external/description
  */
 
 import { Type, type TSchema } from '@sinclair/typebox'
@@ -64,11 +67,20 @@ export interface MessageSentPayload {
   durationMs: number
 }
 
-/** Generic external event — used by webhooks, API ingest, or any external producer. */
-export interface TriggerPayload {
-  source: string
-  name: string
-  data: Record<string, unknown>
+export interface TaskRequestedPayload {
+  prompt: string
+}
+
+export interface TaskDonePayload {
+  prompt: string
+  reply: string
+  durationMs: number
+}
+
+export interface TaskErrorPayload {
+  prompt: string
+  error: string
+  durationMs: number
 }
 
 // ==================== Event Map ====================
@@ -85,7 +97,9 @@ export interface AgentEventMap {
   'heartbeat.error': HeartbeatErrorPayload
   'message.received': MessageReceivedPayload
   'message.sent': MessageSentPayload
-  'trigger': TriggerPayload
+  'task.requested': TaskRequestedPayload
+  'task.done': TaskDonePayload
+  'task.error': TaskErrorPayload
 }
 
 // ==================== TypeBox Schemas ====================
@@ -141,23 +155,100 @@ const MessageSentSchema = Type.Object({
   durationMs: Type.Number(),
 })
 
-const TriggerSchema = Type.Object({
-  source: Type.String(),
-  name: Type.String(),
-  data: Type.Record(Type.String(), Type.Unknown()),
+const TaskRequestedSchema = Type.Object({
+  prompt: Type.String(),
 })
 
-/** Schema registry — same keys as AgentEventMap. */
-export const AgentEventSchemas: { [K in keyof AgentEventMap]: TSchema } = {
-  'cron.fire': CronFireSchema,
-  'cron.done': CronDoneSchema,
-  'cron.error': CronErrorSchema,
-  'heartbeat.done': HeartbeatDoneSchema,
-  'heartbeat.skip': HeartbeatSkipSchema,
-  'heartbeat.error': HeartbeatErrorSchema,
-  'message.received': MessageReceivedSchema,
-  'message.sent': MessageSentSchema,
-  'trigger': TriggerSchema,
+const TaskDoneSchema = Type.Object({
+  prompt: Type.String(),
+  reply: Type.String(),
+  durationMs: Type.Number(),
+})
+
+const TaskErrorSchema = Type.Object({
+  prompt: Type.String(),
+  error: Type.String(),
+  durationMs: Type.Number(),
+})
+
+// ==================== AgentEvents — metadata registry ====================
+
+export interface AgentEventMeta {
+  /** TypeBox schema for runtime payload validation. */
+  schema: TSchema
+  /** If true, this event type may be ingested from outside the process
+   *  (HTTP webhook, external API). Internal-only types cannot be
+   *  forged by external callers. Default: false. */
+  external?: boolean
+  /** Optional human-readable description — surfaced in topology UI tooltips. */
+  description?: string
+}
+
+/** Single source of truth — metadata for every registered event type. */
+export const AgentEvents: { [K in keyof AgentEventMap]: AgentEventMeta } = {
+  'cron.fire': {
+    schema: CronFireSchema,
+    description: 'Cron scheduler timer fired for a registered job.',
+  },
+  'cron.done': {
+    schema: CronDoneSchema,
+    description: 'Cron job was routed through the AI and completed successfully.',
+  },
+  'cron.error': {
+    schema: CronErrorSchema,
+    description: 'Cron job routing through the AI failed.',
+  },
+  'heartbeat.done': {
+    schema: HeartbeatDoneSchema,
+    description: 'Heartbeat produced content and (attempted to) deliver a notification.',
+  },
+  'heartbeat.skip': {
+    schema: HeartbeatSkipSchema,
+    description: 'Heartbeat fired but no notification was sent (HEARTBEAT_OK, duplicate, outside active hours, or empty).',
+  },
+  'heartbeat.error': {
+    schema: HeartbeatErrorSchema,
+    description: 'Heartbeat invocation errored.',
+  },
+  'message.received': {
+    schema: MessageReceivedSchema,
+    description: 'A user message arrived on a connector (Web chat, Telegram, etc.).',
+  },
+  'message.sent': {
+    schema: MessageSentSchema,
+    description: 'An assistant reply was dispatched on a connector.',
+  },
+  'task.requested': {
+    schema: TaskRequestedSchema,
+    external: true,
+    description: 'External caller asked Alice to run a one-shot task with the given prompt. Ingestible via POST /api/events/ingest.',
+  },
+  'task.done': {
+    schema: TaskDoneSchema,
+    description: 'A requested task completed and its reply was dispatched.',
+  },
+  'task.error': {
+    schema: TaskErrorSchema,
+    description: 'A requested task failed during execution.',
+  },
+}
+
+// ==================== Derived views ====================
+
+/** Schemas-only map — derived for Ajv compilation and existing consumers. */
+export const AgentEventSchemas: { [K in keyof AgentEventMap]: TSchema } =
+  Object.fromEntries(
+    (Object.keys(AgentEvents) as Array<keyof AgentEventMap>).map(
+      (k) => [k, AgentEvents[k].schema],
+    ),
+  ) as { [K in keyof AgentEventMap]: TSchema }
+
+/** Whether this event type may be ingested from outside the process. */
+export function isExternalEventType(type: string): boolean {
+  return (
+    type in AgentEvents &&
+    AgentEvents[type as keyof AgentEventMap].external === true
+  )
 }
 
 // ==================== Runtime Validation ====================
@@ -169,8 +260,8 @@ const ajv = new (AjvPkg as unknown as new (opts?: object) => import('ajv').defau
 })
 
 const validators = new Map<string, ReturnType<typeof ajv.compile>>()
-for (const [type, schema] of Object.entries(AgentEventSchemas)) {
-  validators.set(type, ajv.compile(schema))
+for (const [type, meta] of Object.entries(AgentEvents)) {
+  validators.set(type, ajv.compile(meta.schema))
 }
 
 /**

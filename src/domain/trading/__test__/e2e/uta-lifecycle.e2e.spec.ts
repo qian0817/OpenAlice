@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import Decimal from 'decimal.js'
 import { UnifiedTradingAccount } from '../../UnifiedTradingAccount.js'
 import { MockBroker } from '../../brokers/mock/index.js'
 import '../../contract-ext.js'
@@ -228,5 +229,54 @@ describe('UTA — precision end-to-end', () => {
 
     const positions = await broker.getPositions()
     expect(positions[0].quantity.toString()).toBe('0.7')
+  })
+
+  it('lmtPrice preserves string-input precision stage → push', async () => {
+    broker.setQuote('ETH', 1920)
+    uta.stagePlaceOrder({
+      aliceId: 'mock-paper|ETH', symbol: 'ETH', action: 'BUY', orderType: 'LMT',
+      totalQuantity: '0.12345678', lmtPrice: '0.00001234',
+    })
+    uta.commit('buy ETH limit precise')
+    const result = await uta.push()
+
+    expect(result.submitted).toHaveLength(1)
+    const orderId = result.submitted[0].orderId!
+    const orders = await broker.getOrders([orderId])
+    expect(orders).toHaveLength(1)
+    expect(orders[0].order.lmtPrice.toFixed()).toBe('0.00001234')
+    expect(orders[0].order.totalQuantity.toFixed()).toBe('0.12345678')
+  })
+
+  it('wallet status JSON emits price as string (no IEEE noise)', async () => {
+    broker.setQuote('AAPL', 150)
+    uta.stagePlaceOrder({
+      aliceId: 'mock-paper|AAPL', symbol: 'AAPL', action: 'BUY', orderType: 'LMT',
+      totalQuantity: 10, lmtPrice: 145.25,
+    })
+    // Status before commit — staged ops only
+    const wire = JSON.parse(JSON.stringify(uta.status()))
+    const staged = wire.staged[0]
+    expect(typeof staged.order.lmtPrice).toBe('string')
+    expect(staged.order.lmtPrice).toBe('145.25')
+    expect(typeof staged.order.totalQuantity).toBe('string')
+    expect(staged.order.totalQuantity).toBe('10')
+  })
+
+  it('clean string input stays clean through the full pipeline', async () => {
+    // String input '0.3' bypasses the IEEE 754 trap that `0.1 + 0.2`
+    // introduces at the JS-number layer. Decimal preserves the clean value
+    // all the way to the broker.
+    broker.setQuote('AAPL', 150)
+    uta.stagePlaceOrder({
+      aliceId: 'mock-paper|AAPL', symbol: 'AAPL', action: 'BUY', orderType: 'LMT',
+      totalQuantity: 100, lmtPrice: '0.3',
+    })
+    uta.commit('clean price')
+    const result = await uta.push()
+    const orderId = result.submitted[0].orderId!
+    const orders = await broker.getOrders([orderId])
+    expect(orders[0].order.lmtPrice.equals(new Decimal('0.3'))).toBe(true)
+    expect(orders[0].order.lmtPrice.toFixed()).toBe('0.3')
   })
 })

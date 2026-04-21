@@ -30,6 +30,23 @@ function opSymbol(op: WalletStatus['staged'][number]): string {
   return sep !== -1 ? raw.slice(sep + 1) : raw
 }
 
+/**
+ * Format quantity/price for display.
+ * Strings pass through (backend already Decimal-serialized).
+ * Numbers go through toFixed(8) + trim to avoid IEEE 754 artifacts and
+ * the default toLocaleString behavior that truncates decimals to 3 (which
+ * turns crypto-scale quantities like 0.00012345 into "0").
+ */
+function fmtNum(n: number | string | undefined | null): string {
+  if (n == null || n === '') return ''
+  if (typeof n === 'string') return n
+  if (!Number.isFinite(n)) return String(n)
+  const rounded = n.toFixed(8).replace(/\.?0+$/, '')
+  const [intPart, decPart] = rounded.split('.')
+  const withCommas = Number(intPart).toLocaleString('en-US')
+  return decPart ? `${withCommas}.${decPart}` : withCommas
+}
+
 /** Format operation for display — returns { text, isBuy } */
 function formatOp(op: WalletStatus['staged'][number]): { text: string; side?: 'buy' | 'sell' } {
   const symbol = opSymbol(op)
@@ -39,16 +56,18 @@ function formatOp(op: WalletStatus['staged'][number]): { text: string; side?: 'b
       const isBuy = sideRaw === 'BUY'
       const type = (op.order?.orderType || '').toUpperCase()
       const typeBadge = type === 'MKT' || type === 'MARKET' ? 'MKT' : type === 'LMT' || type === 'LIMIT' ? 'LMT' : type
-      const qty = op.order?.totalQuantity ?? op.order?.cashQty ?? ''
-      const qtyStr = typeof qty === 'number' ? qty.toLocaleString() : String(qty)
-      const price = op.order?.lmtPrice ? ` @ ${op.order.lmtPrice}` : ''
+      const qtyStr = fmtNum(op.order?.totalQuantity ?? op.order?.cashQty)
+      const priceStr = fmtNum(op.order?.lmtPrice)
+      const price = priceStr ? ` @ ${priceStr}` : ''
       return {
         text: `${sideRaw} ${qtyStr} ${symbol} ${typeBadge}${price}`.trim(),
         side: isBuy ? 'buy' : 'sell',
       }
     }
-    case 'closePosition':
-      return { text: `CLOSE ${symbol}${op.quantity ? ` (${op.quantity})` : ''}`, side: 'sell' }
+    case 'closePosition': {
+      const qtyStr = fmtNum(op.quantity)
+      return { text: `CLOSE ${symbol}${qtyStr ? ` (${qtyStr})` : ''}`, side: 'sell' }
+    }
     case 'modifyOrder':
       return { text: `MODIFY ${op.orderId || '?'}` }
     case 'cancelOrder':

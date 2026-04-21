@@ -3,7 +3,8 @@
  * Mirrors: ibapi/comm.py
  */
 
-import { UNSET_INTEGER, UNSET_DOUBLE, DOUBLE_INFINITY, INFINITY_STR } from './const.js'
+import Decimal from 'decimal.js'
+import { UNSET_INTEGER, UNSET_DOUBLE, UNSET_DECIMAL, DOUBLE_INFINITY, INFINITY_STR } from './const.js'
 import { ClientException, isAsciiPrintable } from './utils.js'
 import { INVALID_SYMBOL } from './errors.js'
 
@@ -57,6 +58,12 @@ export function makeField(val: unknown): string {
     throw new Error('Cannot send None to TWS')
   }
 
+  // Decimal: use toFixed() to avoid scientific notation on small values
+  // (Decimal.toString() uses '1e-8' by default; TWS wire expects '0.00000001').
+  if (val instanceof Decimal) {
+    return val.toFixed() + '\0'
+  }
+
   // Validate printable ASCII for strings
   if (typeof val === 'string' && val.length > 0 && !isAsciiPrintable(val)) {
     throw new ClientException(
@@ -80,6 +87,11 @@ export function makeField(val: unknown): string {
 export function makeFieldHandleEmpty(val: unknown): string {
   if (val === null || val === undefined) {
     throw new Error('Cannot send None to TWS')
+  }
+
+  if (val instanceof Decimal) {
+    if (val.equals(UNSET_DECIMAL)) return makeField('')
+    return makeField(val)
   }
 
   if (val === UNSET_INTEGER || val === UNSET_DOUBLE) {

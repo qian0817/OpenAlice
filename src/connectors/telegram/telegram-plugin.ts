@@ -12,10 +12,12 @@ import { SessionStore } from '../../core/session'
 import { forceCompact } from '../../core/compaction'
 import { readAIProviderConfig, setActiveProfile, readConnectorsConfig } from '../../core/config'
 import type { ConnectorCenter } from '../../core/connector-center.js'
+import type { ProducerHandle } from '../../core/producer.js'
 import { TelegramConnector, splitMessage, MAX_MESSAGE_LENGTH } from './telegram-connector.js'
 import type { AccountManager } from '../../domain/trading/index.js'
 import type { Operation } from '../../domain/trading/git/types.js'
 import { getOperationSymbol } from '../../domain/trading/git/types.js'
+import { UNSET_DECIMAL } from '@traderalice/ibkr'
 
 /** Build a display label for a profile. */
 function profileLabel(name: string, profile: { model: string }): string {
@@ -30,6 +32,7 @@ export class TelegramPlugin implements Plugin {
   private connectorCenter: ConnectorCenter | null = null
   private merger: MediaGroupMerger | null = null
   private unregisterConnector?: () => void
+  private producer: ProducerHandle<readonly ['message.received', 'message.sent']> | null = null
 
   /** Per-user unified session stores (keyed by userId). */
   private sessions = new Map<number, SessionStore>()
@@ -49,6 +52,10 @@ export class TelegramPlugin implements Plugin {
   async start(engineCtx: EngineContext) {
     this.connectorCenter = engineCtx.connectorCenter
     this.webPort = engineCtx.config.connectors.web.port
+    this.producer = engineCtx.listenerRegistry.declareProducer({
+      name: 'telegram-connector',
+      emits: ['message.received', 'message.sent'] as const,
+    })
 
     // Inject agent config into Claude Code config (used by /compact command)
     this.agentSdkConfig = {
@@ -242,6 +249,8 @@ export class TelegramPlugin implements Plugin {
     this.merger?.flush()
     await this.bot?.stop()
     this.unregisterConnector?.()
+    this.producer?.dispose()
+    this.producer = null
   }
 
   private async getSession(userId: number): Promise<SessionStore> {
@@ -275,7 +284,7 @@ export class TelegramPlugin implements Plugin {
       if (!prompt) return
 
       // Log: message received
-      const receivedEntry = await engineCtx.eventLog.append('message.received', {
+      const receivedEntry = await this.producer!.emit('message.received', {
         channel: 'telegram',
         to: String(message.chatId),
         prompt,
@@ -295,7 +304,7 @@ export class TelegramPlugin implements Plugin {
         await this.sendReplyWithPlaceholder(message.chatId, result.text, result.media, placeholder?.message_id)
 
         // Log: message sent
-        await engineCtx.eventLog.append('message.sent', {
+        await this.producer!.emit('message.sent', {
           channel: 'telegram',
           to: String(message.chatId),
           prompt,
@@ -550,7 +559,9 @@ export class TelegramPlugin implements Plugin {
         const side = op.order?.action || '?'
         const qty = op.order?.totalQuantity
         const cashQty = op.order?.cashQty
-        const size = (cashQty && cashQty > 0) ? `$${cashQty}` : qty ? `${qty}` : '?'
+        const hasCash = cashQty && !cashQty.equals(UNSET_DECIMAL) && cashQty.gt(0)
+        const hasQty = qty && !qty.equals(UNSET_DECIMAL)
+        const size = hasCash ? `$${cashQty.toFixed()}` : hasQty ? qty.toFixed() : '?'
         return `${side} ${symbol} ${size}`
       }
       case 'closePosition':

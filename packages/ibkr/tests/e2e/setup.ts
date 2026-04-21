@@ -8,7 +8,8 @@
  * If TWS is not running, `available` is false and tests should skip.
  */
 
-import { EClient, DefaultEWrapper, type ContractDetails } from '../../src/index.js'
+import Decimal from 'decimal.js'
+import { EClient, DefaultEWrapper, type ContractDetails, type Contract, type Order, type OrderState } from '../../src/index.js'
 import { isTwsAvailable, TWS_HOST, TWS_PORT } from '../helpers/tws.js'
 
 // --- Collected results from TWS callbacks ---
@@ -21,6 +22,10 @@ export const results = {
   errors: [] as Array<{ reqId: number; code: number; msg: string }>,
   contractDetails: new Map<number, ContractDetails[]>(),
   contractDetailsEnded: new Set<number>(),
+  // openOrder callback payloads keyed by orderId (last-write wins)
+  openOrders: new Map<number, { contract: Contract; order: Order; orderState: OrderState }>(),
+  openOrderEnded: false,
+  orderStatus: new Map<number, { status: string; filled: Decimal; remaining: Decimal }>(),
 }
 
 // --- Wrapper that collects everything ---
@@ -54,10 +59,27 @@ class E2EWrapper extends DefaultEWrapper {
   }
 
   error(reqId: number, _t: number, code: number, msg: string) {
-    // 2000+ are informational (farm connections, etc.)
-    if (code < 2000) {
-      results.errors.push({ reqId, code, msg })
-    }
+    // Capture everything during order-flow debugging. Informational (2000+)
+    // is useful too: 2109 ("order located behind market"), 2110 ("order
+    // rejected—no trading permissions"), etc.
+    results.errors.push({ reqId, code, msg })
+  }
+
+  openOrder(orderId: number, contract: Contract, order: Order, orderState: OrderState) {
+    results.openOrders.set(orderId, { contract, order, orderState })
+  }
+
+  openOrderEnd() {
+    results.openOrderEnded = true
+  }
+
+  orderStatus(
+    orderId: number,
+    status: string,
+    filled: Decimal,
+    remaining: Decimal,
+  ) {
+    results.orderStatus.set(orderId, { status, filled, remaining })
   }
 }
 

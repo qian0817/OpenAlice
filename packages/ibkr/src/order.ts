@@ -46,8 +46,8 @@ export class Order {
   action: string = ''
   totalQuantity: Decimal = UNSET_DECIMAL
   orderType: string = ''
-  lmtPrice: number = UNSET_DOUBLE
-  auxPrice: number = UNSET_DOUBLE
+  lmtPrice: Decimal = UNSET_DECIMAL
+  auxPrice: Decimal = UNSET_DECIMAL
 
   // extended order fields
   tif: string = '' // "Time in Force" - DAY, GTC, etc.
@@ -71,8 +71,8 @@ export class Order {
   minQty: number = UNSET_INTEGER
   percentOffset: number = UNSET_DOUBLE // REL orders only
   overridePercentageConstraints: boolean = false
-  trailStopPrice: number = UNSET_DOUBLE
-  trailingPercent: number = UNSET_DOUBLE // TRAILLIMIT orders only
+  trailStopPrice: Decimal = UNSET_DECIMAL
+  trailingPercent: Decimal = UNSET_DECIMAL // TRAILLIMIT orders only
 
   // financial advisors only
   faGroup: string = ''
@@ -192,7 +192,7 @@ export class Order {
   extOperator: string = ''
 
   // native cash quantity
-  cashQty: number = UNSET_DOUBLE
+  cashQty: Decimal = UNSET_DECIMAL
 
   mifid2DecisionMaker: string = ''
   mifid2DecisionAlgo: string = ''
@@ -246,7 +246,7 @@ export class Order {
   toString(): string {
     let s = `${intMaxString(this.orderId)},${intMaxString(this.clientId)},${longMaxString(this.permId)}:`
 
-    s += ` ${this.orderType} ${this.action} ${decimalMaxString(this.totalQuantity)}@${floatMaxString(this.lmtPrice)}`
+    s += ` ${this.orderType} ${this.action} ${decimalMaxString(this.totalQuantity)}@${decimalMaxString(this.lmtPrice)}`
 
     s += ` ${this.tif}`
 

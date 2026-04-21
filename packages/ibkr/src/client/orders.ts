@@ -7,7 +7,7 @@ import { EClient } from './base.js'
 import { makeField, makeFieldHandleEmpty } from '../comm.js'
 import { OUT } from '../message.js'
 import * as SV from '../server-versions.js'
-import { NO_VALID_ID, UNSET_DOUBLE, UNSET_INTEGER } from '../const.js'
+import { NO_VALID_ID, UNSET_DOUBLE, UNSET_INTEGER, UNSET_DECIMAL } from '../const.js'
 import * as errors from '../errors.js'
 import { currentTimeMillis, isPegBenchOrder, isPegBestOrder, isPegMidOrder } from '../utils.js'
 import { COMPETE_AGAINST_BEST_OFFSET_UP_TO_MID } from '../order.js'
@@ -160,7 +160,7 @@ export function applyOrders(Client: typeof EClient): void {
     }
 
     if (this.serverVersion() < SV.MIN_SERVER_VER_TRAILING_PERCENT) {
-      if (order.trailingPercent !== UNSET_DOUBLE) {
+      if (!order.trailingPercent.equals(UNSET_DECIMAL)) {
         this.wrapper.error(orderId, currentTimeMillis(), errors.UPDATE_TWS.code(), errors.UPDATE_TWS.msg() + '  It does not support trailing percent parameter')
         return
       }
@@ -216,7 +216,7 @@ export function applyOrders(Client: typeof EClient): void {
     }
 
     if (this.serverVersion() < SV.MIN_SERVER_VER_CASH_QTY) {
-      if (order.cashQty) {
+      if (!order.cashQty.equals(UNSET_DECIMAL)) {
         this.wrapper.error(orderId, currentTimeMillis(), errors.UPDATE_TWS.code(), errors.UPDATE_TWS.msg() + ' It does not support cash quantity parameter')
         return
       }
@@ -356,12 +356,12 @@ export function applyOrders(Client: typeof EClient): void {
 
       flds.push(makeField(order.orderType))
       if (this.serverVersion() < SV.MIN_SERVER_VER_ORDER_COMBO_LEGS_PRICE) {
-        flds.push(makeField(order.lmtPrice !== UNSET_DOUBLE ? order.lmtPrice : 0))
+        flds.push(makeField(!order.lmtPrice.equals(UNSET_DECIMAL) ? order.lmtPrice : 0))
       } else {
         flds.push(makeFieldHandleEmpty(order.lmtPrice))
       }
       if (this.serverVersion() < SV.MIN_SERVER_VER_TRAILING_PERCENT) {
-        flds.push(makeField(order.auxPrice !== UNSET_DOUBLE ? order.auxPrice : 0))
+        flds.push(makeField(!order.auxPrice.equals(UNSET_DECIMAL) ? order.auxPrice : 0))
       } else {
         flds.push(makeFieldHandleEmpty(order.auxPrice))
       }
@@ -671,7 +671,9 @@ export function applyOrders(Client: typeof EClient): void {
       }
 
       if (this.serverVersion() >= SV.MIN_SERVER_VER_CASH_QTY) {
-        flds.push(makeField(order.cashQty))
+        // Must handle UNSET: sending a raw UNSET_DECIMAL string
+        // (~1.7e38) would make TWS think cashQty is actually set.
+        flds.push(makeFieldHandleEmpty(order.cashQty))
       }
 
       if (this.serverVersion() >= SV.MIN_SERVER_VER_DECISION_MAKER) {

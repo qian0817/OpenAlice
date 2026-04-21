@@ -9,7 +9,7 @@ import { OrderState } from '../src/order-state.js'
 import { Execution, ExecutionFilter } from '../src/execution.js'
 import { TagValue } from '../src/tag-value.js'
 import { SoftDollarTier } from '../src/softdollartier.js'
-import { UNSET_DOUBLE, UNSET_INTEGER } from '../src/const.js'
+import { UNSET_DOUBLE, UNSET_INTEGER, UNSET_DECIMAL } from '../src/const.js'
 
 describe('Contract', () => {
   it('has sensible defaults', () => {
@@ -36,8 +36,8 @@ describe('Order', () => {
     expect(o.orderId).toBe(0)
     expect(o.action).toBe('')
     expect(o.orderType).toBe('')
-    expect(o.lmtPrice).toBe(UNSET_DOUBLE)
-    expect(o.auxPrice).toBe(UNSET_DOUBLE)
+    expect(o.lmtPrice.equals(UNSET_DECIMAL)).toBe(true)
+    expect(o.auxPrice.equals(UNSET_DECIMAL)).toBe(true)
     expect(o.transmit).toBe(true)
   })
 })

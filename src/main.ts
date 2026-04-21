@@ -1,4 +1,4 @@
-import { readFile, writeFile, appendFile, mkdir } from 'fs/promises'
+import { readFile, writeFile, mkdir } from 'fs/promises'
 import { resolve, dirname } from 'path'
 // Engine removed — AgentCenter is the top-level AI entry point
 import { loadConfig, readAccountsConfig } from './core/config.js'
@@ -28,7 +28,6 @@ import { OpenBBEquityClient } from './domain/market-data/client/openbb-api/equit
 import { OpenBBCryptoClient } from './domain/market-data/client/openbb-api/crypto-client.js'
 import { OpenBBCurrencyClient } from './domain/market-data/client/openbb-api/currency-client.js'
 import { OpenBBCommodityClient } from './domain/market-data/client/openbb-api/commodity-client.js'
-import { OpenBBServerPlugin } from './server/opentypebb.js'
 import { createMarketSearchTools } from './tool/market.js'
 import { createAnalysisTools } from './tool/analysis.js'
 import { createSessionTools } from './tool/session.js'
@@ -42,8 +41,12 @@ import { AgentSdkProvider } from './ai-providers/agent-sdk/agent-sdk-provider.js
 import { CodexProvider } from './ai-providers/codex/index.js'
 import { createEventLog } from './core/event-log.js'
 import { createToolCallLog } from './core/tool-call-log.js'
+import { createListenerRegistry } from './core/listener-registry.js'
+import { createEventBus } from './core/event-bus.js'
 import { createCronEngine, createCronListener, createCronTools } from './task/cron/index.js'
 import { createHeartbeat } from './task/heartbeat/index.js'
+import { createMetricsListener } from './task/metrics/index.js'
+import { createTaskRouter } from './task/task-router/index.js'
 import { NewsCollectorStore, NewsCollector } from './domain/news/index.js'
 import { createNewsArchiveTools } from './tool/news.js'
 
@@ -52,13 +55,24 @@ import { createNewsArchiveTools } from './tool/news.js'
 const BRAIN_FILE = resolve('data/brain/commit.json')
 
 const FRONTAL_LOBE_FILE = resolve('data/brain/frontal-lobe.md')
-const EMOTION_LOG_FILE = resolve('data/brain/emotion-log.md')
 const PERSONA_FILE = resolve('data/brain/persona.md')
 const PERSONA_DEFAULT = resolve('default/persona.default.md')
 const HEARTBEAT_FILE = resolve('data/brain/heartbeat.md')
 const HEARTBEAT_DEFAULT = resolve('default/heartbeat.default.md')
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+/** Render a timestamp as "Nm ago" / "Nh ago" / "Nd ago" for prompt injection. */
+function formatRelativeAge(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime()
+  if (diffMs < 60_000) return 'just now'
+  const mins = Math.floor(diffMs / 60_000)
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
 
 /** Read a file, copying from default if it doesn't exist yet. */
 async function readWithDefault(target: string, defaultFile: string): Promise<string> {
@@ -78,6 +92,11 @@ async function main() {
 
   const eventLog = await createEventLog()
   const toolCallLog = await createToolCallLog()
+
+  // ==================== Listener Registry ====================
+  // Created early so CronEngine and other producers can declare against it.
+
+  const listenerRegistry = createListenerRegistry(eventLog)
 
   // ==================== Tool Center (created early — AccountManager needs it) ====================
 
@@ -115,39 +134,34 @@ async function main() {
     await mkdir(brainDir, { recursive: true })
     await writeFile(BRAIN_FILE, JSON.stringify(state, null, 2))
     await writeFile(FRONTAL_LOBE_FILE, state.state.frontalLobe)
-    const latest = state.commits[state.commits.length - 1]
-    if (latest?.type === 'emotion') {
-      const prev = state.commits.length > 1
-        ? state.commits[state.commits.length - 2]?.stateAfter.emotion ?? 'unknown'
-        : 'unknown'
-      await appendFile(EMOTION_LOG_FILE,
-        `## ${latest.timestamp}\n**${prev} → ${latest.stateAfter.emotion}**\n${latest.message}\n\n`)
-    }
   }
 
   const brain = brainExport
     ? Brain.restore(brainExport, { onCommit: brainOnCommit })
     : new Brain({ onCommit: brainOnCommit })
 
-  /** Re-read persona from disk + live brain state on each request. */
+  /** Re-read persona from disk + live frontal-lobe note on each request.
+   *  Frames the note as "you wrote this Nh ago" rather than "current state"
+   *  — the time-distance cue stops her from treating a stale note as
+   *  ground truth. */
   const getInstructions = async () => {
     const persona = await readFile(PERSONA_FILE, 'utf-8').catch(() => '')
-    const frontalLobe = brain.getFrontalLobe()
-    const emotion = brain.getEmotion().current
+    const { content, updatedAt } = brain.getFrontalLobeMeta()
+    if (!content) return persona
+    const age = updatedAt ? formatRelativeAge(updatedAt) : 'at some point'
     return [
       persona,
       '---',
-      '## Current Brain State',
+      '## Notes you wrote to yourself',
+      `_(written ${age})_`,
       '',
-      `**Frontal Lobe:** ${frontalLobe || '(empty)'}`,
-      '',
-      `**Emotion:** ${emotion}`,
+      content,
     ].join('\n')
   }
 
   // ==================== Cron ====================
 
-  const cronEngine = createCronEngine({ eventLog })
+  const cronEngine = createCronEngine({ registry: listenerRegistry })
 
   // ==================== News Collector Store ====================
 
@@ -189,8 +203,6 @@ async function main() {
     derivativesClient = new SDKDerivativesClient(executor, 'derivatives', providers.equity, credentials, routeMap)
   }
 
-  // OpenBB API server is started later via optionalPlugins
-
   // ==================== FX Service ====================
 
   const fxService = new FxService(currencyClient)
@@ -217,6 +229,7 @@ async function main() {
     }
     toolCenter.register(createChinaEquityTools(chinaEquityClient), 'china-equity')
   }
+  const marketSearch = { symbolIndex, cryptoClient, currencyClient, commodityCatalog, chinaSymbolIndex }
 
   // ==================== Tool Registration ====================
 
@@ -231,7 +244,7 @@ async function main() {
   toolCenter.register(createBrainTools(brain), 'brain')
   toolCenter.register(createBrowserTools(), 'browser')
   toolCenter.register(createCronTools(cronEngine), 'cron')
-  toolCenter.register(createMarketSearchTools(symbolIndex, cryptoClient, currencyClient, commodityCatalog, chinaSymbolIndex), 'market-search')
+  toolCenter.register(createMarketSearchTools(marketSearch), 'market-search')
   toolCenter.register(createEquityTools(equityClient), 'equity')
   if (config.news.enabled) {
     toolCenter.register(createNewsArchiveTools(newsStore), 'news')
@@ -265,23 +278,21 @@ async function main() {
 
   // ==================== Connector Center ====================
 
-  const connectorCenter = new ConnectorCenter(eventLog)
+  const connectorCenter = new ConnectorCenter({ eventLog, listenerRegistry })
 
   // Session awareness tools (registered here because they need connectorCenter)
   toolCenter.register(createSessionTools(connectorCenter), 'session')
 
-  // ==================== Cron Lifecycle ====================
+  // ==================== Cron Listener ====================
 
-  await cronEngine.start()
   const cronSession = new SessionStore('cron/default')
   await cronSession.restore()
-  const cronListener = createCronListener({ connectorCenter, eventLog, agentCenter, session: cronSession })
-  cronListener.start()
-  console.log('cron: engine + listener started')
+  const cronListener = createCronListener({ connectorCenter, agentCenter, registry: listenerRegistry, session: cronSession })
+  await cronListener.start()
 
   // ==================== Snapshot Scheduler ====================
 
-  const snapshotScheduler = createSnapshotScheduler({ snapshotService, cronEngine, eventLog, config: config.snapshot })
+  const snapshotScheduler = createSnapshotScheduler({ snapshotService, cronEngine, registry: listenerRegistry, config: config.snapshot })
   await snapshotScheduler.start()
   if (config.snapshot.enabled) {
     console.log(`snapshot: scheduler started (every ${config.snapshot.every})`)
@@ -291,12 +302,29 @@ async function main() {
 
   const heartbeat = createHeartbeat({
     config: config.heartbeat,
-    connectorCenter, cronEngine, eventLog, agentCenter,
+    connectorCenter, cronEngine, agentCenter, registry: listenerRegistry,
   })
   await heartbeat.start()
   if (config.heartbeat.enabled) {
     console.log(`heartbeat: enabled (every ${config.heartbeat.every})`)
   }
+
+  // ==================== Task Router (external `task.requested` handler) ====================
+
+  const taskRouter = createTaskRouter({ connectorCenter, agentCenter, registry: listenerRegistry })
+  await taskRouter.start()
+
+  // ==================== Event Metrics (wildcard observer) ====================
+
+  const metricsListener = createMetricsListener({ registry: listenerRegistry })
+  await metricsListener.start()
+
+  // ==================== Activate Listeners + Start Cron Engine ====================
+
+  await listenerRegistry.start()
+  await cronEngine.start()
+  console.log(`listener-registry: started (${listenerRegistry.list().length} listeners)`)
+  console.log('cron: engine started')
 
   // ==================== News Collector ====================
 
@@ -308,7 +336,8 @@ async function main() {
       intervalMs: config.news.intervalMinutes * 60 * 1000,
     })
     newsCollector.start()
-    console.log(`news-collector: started (${config.news.feeds.length} feeds, every ${config.news.intervalMinutes}m)`)
+    const activeCount = config.news.feeds.filter((f) => f.enabled !== false).length
+    console.log(`news-collector: started (${activeCount}/${config.news.feeds.length} feeds active, every ${config.news.intervalMinutes}m)`)
   }
 
   // ==================== Plugins ====================
@@ -338,10 +367,6 @@ async function main() {
       token: config.connectors.telegram.botToken,
       allowedChatIds: config.connectors.telegram.chatIds,
     }))
-  }
-
-  if (config.marketData.apiServer.enabled) {
-    optionalPlugins.set('openbb-server', new OpenBBServerPlugin({ port: config.marketData.apiServer.port }))
   }
 
   // ==================== Connector Reconnect ====================
@@ -385,30 +410,6 @@ async function main() {
         changes.push('telegram started')
       }
 
-      // --- OpenBB API Server ---
-      const openbbWanted = fresh.marketData.apiServer.enabled
-      const openbbRunning = optionalPlugins.has('openbb-server')
-      if (openbbRunning && !openbbWanted) {
-        await optionalPlugins.get('openbb-server')!.stop()
-        optionalPlugins.delete('openbb-server')
-        changes.push('openbb-server stopped')
-      } else if (!openbbRunning && openbbWanted) {
-        const p = new OpenBBServerPlugin({ port: fresh.marketData.apiServer.port })
-        await p.start(ctx)
-        optionalPlugins.set('openbb-server', p)
-        changes.push('openbb-server started')
-      } else if (openbbRunning && openbbWanted) {
-        const current = optionalPlugins.get('openbb-server') as OpenBBServerPlugin
-        if (current.port !== fresh.marketData.apiServer.port) {
-          await current.stop()
-          optionalPlugins.delete('openbb-server')
-          const p = new OpenBBServerPlugin({ port: fresh.marketData.apiServer.port })
-          await p.start(ctx)
-          optionalPlugins.set('openbb-server', p)
-          changes.push(`openbb-server restarted on port ${fresh.marketData.apiServer.port}`)
-        }
-      }
-
       if (changes.length > 0) {
         console.log(`reconnect: connectors — ${changes.join(', ')}`)
       }
@@ -426,7 +427,10 @@ async function main() {
 
   const ctx: EngineContext = {
     config, connectorCenter, agentCenter, eventLog, toolCallLog, heartbeat, cronEngine, toolCenter,
+    listenerRegistry,
+    fire: createEventBus(eventLog),
     bbEngine: getSDKExecutor(),
+    marketSearch,
     accountManager, fxService, snapshotService,
     newsProvider: newsStore,
     reconnectConnectors,
@@ -447,8 +451,10 @@ async function main() {
     newsCollector?.stop()
     snapshotScheduler.stop()
     heartbeat.stop()
+    metricsListener.stop()
     cronListener.stop()
     cronEngine.stop()
+    await listenerRegistry.stop()
     for (const plugin of [...corePlugins, ...optionalPlugins.values()]) {
       await plugin.stop()
     }

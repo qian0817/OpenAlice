@@ -5,6 +5,42 @@
 
 import { OpenBBError } from './errors.js'
 
+/** Query-param names that carry secrets and must not appear in error logs. */
+const SECRET_QUERY_KEYS = new Set([
+  'apikey', 'api_key', 'api-key',
+  'token', 'access_token', 'accesstoken',
+  'key', 'secret', 'password',
+])
+
+/**
+ * Return `url` with any secret-bearing query-string values replaced by `***`.
+ * Used before embedding URLs into error messages / logs so credentials never leak.
+ * Falls back to the original string if parsing fails.
+ */
+function redactUrl(url: string): string {
+  try {
+    const u = new URL(url)
+    for (const [k] of u.searchParams) {
+      if (SECRET_QUERY_KEYS.has(k.toLowerCase())) {
+        u.searchParams.set(k, '***')
+      }
+    }
+    return u.toString()
+  } catch {
+    return url
+  }
+}
+
+/** Extract a short description from a caught value, for chaining into error text. */
+function describeCause(err: unknown): string {
+  if (err instanceof Error) {
+    const parts = [err.name !== 'Error' ? err.name : '', err.message].filter(Boolean)
+    return parts.join(': ')
+  }
+  if (typeof err === 'string') return err
+  try { return JSON.stringify(err) } catch { return String(err) }
+}
+
 /**
  * Make an async HTTP request and return the parsed JSON response.
  * Maps to: amake_request() in helpers.py
@@ -26,6 +62,7 @@ export async function amakeRequest<T = unknown>(
   } = {},
 ): Promise<T> {
   const { method = 'GET', headers, body, timeoutMs = 30_000, responseCallback } = options
+  const safeUrl = redactUrl(url)
 
   let response: Response
   try {
@@ -37,9 +74,9 @@ export async function amakeRequest<T = unknown>(
     })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'TimeoutError') {
-      throw new OpenBBError(`Request timed out after ${timeoutMs}ms: ${url}`)
+      throw new OpenBBError(`Request timed out after ${timeoutMs}ms: ${safeUrl}`)
     }
-    throw new OpenBBError(`Request failed: ${url}`, error)
+    throw new OpenBBError(`Request failed (${describeCause(error)}): ${safeUrl}`, error)
   }
 
   if (responseCallback) {
@@ -49,14 +86,14 @@ export async function amakeRequest<T = unknown>(
   if (!response.ok) {
     const text = await response.text().catch(() => '')
     throw new OpenBBError(
-      `HTTP ${response.status} ${response.statusText}: ${url}${text ? ` - ${text}` : ''}`,
+      `HTTP ${response.status} ${response.statusText}: ${safeUrl}${text ? ` - ${text}` : ''}`,
     )
   }
 
   try {
     return (await response.json()) as T
   } catch (error) {
-    throw new OpenBBError(`Failed to parse JSON response from: ${url}`, error)
+    throw new OpenBBError(`Failed to parse JSON response (${describeCause(error)}): ${safeUrl}`, error)
   }
 }
 
