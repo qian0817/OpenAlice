@@ -32,24 +32,30 @@ export function KeyMetricsPanel({ symbol }: Props) {
 
   const m = data?.metrics ?? {}
   const r = data?.ratios ?? {}
+  // Ratios gives us valuation + margins; metrics gives market_cap, EV, ROE/ROA.
+  // Merge with metrics winning where both have a key.
   const both = { ...r, ...m } as Record<string, unknown>
 
-  // Small curated list — the raw schemas carry 100+ fields that swamp a user.
+  // Curated list of what most investors glance at. FMP's live schema uses
+  // snake_case for canonical fields and *TTM camelCase for trailing variants;
+  // we pick snake_case first and fall back where the canonical is missing.
   const rows: Array<[string, string]> = [
-    ['P/E',          fmtNumber(both.pe_ratio ?? both.priceToEarningsRatioTTM)],
-    ['PEG',          fmtNumber(both.priceEarningsToGrowthRatioTTM)],
-    ['P/S',          fmtNumber(both.priceToSalesRatioTTM)],
-    ['P/B',          fmtNumber(both.priceToBookRatioTTM)],
-    ['EV/EBITDA',    fmtNumber(both.ev_to_ebitda ?? both.enterpriseValueMultipleTTM)],
-    ['Div Yield',    fmtPercent(both.dividend_yield ?? both.dividendYieldTTM)],
-    ['ROE',          fmtPercent(both.returnOnEquityTTM ?? both.roe)],
-    ['ROA',          fmtPercent(both.returnOnAssetsTTM ?? both.roa)],
-    ['Gross Margin', fmtPercent(both.grossProfitMarginTTM)],
-    ['Net Margin',   fmtPercent(both.netProfitMarginTTM ?? both.bottomLineProfitMarginTTM)],
-    ['Debt/Equity',  fmtNumber(both.debt_to_equity ?? both.debtToEquityRatioTTM)],
-    ['Current Ratio',fmtNumber(both.current_ratio ?? both.currentRatioTTM)],
-    ['Market Cap',   fmtMoneyShort(both.marketCap ?? both.market_cap)],
-    ['Enterprise V', fmtMoneyShort(both.enterprise_value ?? both.enterpriseValueTTM)],
+    ['P/E',           fmtNumber(both.price_to_earnings)],
+    ['PEG',           fmtNumber(both.priceToEarningsGrowthRatioTTM)],
+    ['P/S',           fmtNumber(both.price_to_sales)],
+    ['P/B',           fmtNumber(both.price_to_book)],
+    ['EV/EBITDA',     fmtNumber(both.ev_to_ebitda)],
+    ['EV/Sales',      fmtNumber(both.ev_to_sales)],
+    ['Div Yield',     fmtPercent(both.dividend_yield)],
+    ['ROE',           fmtPercent(both.return_on_equity)],
+    ['ROA',           fmtPercent(both.return_on_assets)],
+    ['Gross Margin',  fmtPercent(both.gross_profit_margin)],
+    ['Op Margin',     fmtPercent(both.operating_profit_margin)],
+    ['Net Margin',    fmtPercent(both.net_profit_margin)],
+    ['Debt/Equity',   fmtNumber(both.debt_to_equity)],
+    ['Current Ratio', fmtNumber(both.current_ratio)],
+    ['Market Cap',    fmtMoneyShort(both.marketCap ?? both.market_cap)],
+    ['Enterprise V',  fmtMoneyShort(both.enterprise_value)],
   ]
 
   return (
