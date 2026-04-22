@@ -17,29 +17,36 @@ export function KeyMetricsPanel({ symbol }: Props) {
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError(null)
-    // Metrics and ratios both feed this panel, but ratios isn't implemented
-    // on every provider (yfinance 500s with "Fetcher not found"). Use
-    // allSettled so a single rejection doesn't discard the other source.
-    Promise.allSettled([marketApi.equity.metrics(symbol), marketApi.equity.ratios(symbol)])
-      .then(([mRes, rRes]) => {
-        if (cancelled) return
-        const m = mRes.status === 'fulfilled' ? mRes.value : null
-        const r = rRes.status === 'fulfilled' ? rRes.value : null
-        const metrics = m?.results?.[0] ?? null
-        const ratios = r?.results?.[0] ?? null
-        if (!metrics && !ratios) {
-          const rejectMsg = (x: PromiseSettledResult<unknown>) =>
-            x.status === 'rejected' ? (x.reason instanceof Error ? x.reason.message : String(x.reason)) : undefined
-          setError(rejectMsg(mRes) ?? m?.error ?? rejectMsg(rRes) ?? r?.error ?? 'No data')
-          return
-        }
-        setData({ metrics, ratios })
-        setProvider(m?.provider ?? r?.provider ?? null)
-      })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
+    const fetch = (isInitial: boolean) => {
+      if (isInitial) setLoading(true)
+      if (isInitial) setError(null)
+      // Metrics and ratios both feed this panel, but ratios isn't implemented
+      // on every provider (yfinance 500s with "Fetcher not found"). Use
+      // allSettled so a single rejection doesn't discard the other source.
+      Promise.allSettled([marketApi.equity.metrics(symbol), marketApi.equity.ratios(symbol)])
+        .then(([mRes, rRes]) => {
+          if (cancelled) return
+          const m = mRes.status === 'fulfilled' ? mRes.value : null
+          const r = rRes.status === 'fulfilled' ? rRes.value : null
+          const metrics = m?.results?.[0] ?? null
+          const ratios = r?.results?.[0] ?? null
+          if (!metrics && !ratios) {
+            const rejectMsg = (x: PromiseSettledResult<unknown>) =>
+              x.status === 'rejected' ? (x.reason instanceof Error ? x.reason.message : String(x.reason)) : undefined
+            setError(rejectMsg(mRes) ?? m?.error ?? rejectMsg(rRes) ?? r?.error ?? 'No data')
+            return
+          }
+          setData({ metrics, ratios })
+          setProvider(m?.provider ?? r?.provider ?? null)
+        })
+        .finally(() => { if (!cancelled && isInitial) setLoading(false) })
+    }
+    fetch(true)
+    // Market cap / valuation ratios move with price; refresh every 5 min so
+    // an overnight-open tab doesn't show stale numbers. Less aggressive than
+    // the quote header because these fields are less price-immediate.
+    const timer = setInterval(() => fetch(false), 300_000)
+    return () => { cancelled = true; clearInterval(timer) }
   }, [symbol])
 
   const m = data?.metrics ?? {}
