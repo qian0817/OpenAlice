@@ -63,7 +63,9 @@ export function KlinePanel({ selection }: Props) {
   const interval = parseInterval(searchParams.get('interval'))
   const tf = parseTimeframe(searchParams.get('range'))
 
-  const setInterval = (iv: Interval) => {
+  // Local setter named `selectInterval` rather than `setInterval` so it
+  // doesn't shadow the global timer function we use for polling below.
+  const selectInterval = (iv: Interval) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
       if (iv === DEFAULT_INTERVAL) next.delete('interval')
@@ -243,7 +245,7 @@ export function KlinePanel({ selection }: Props) {
               {INTERVALS.map((iv, i) => (
                 <button
                   key={iv}
-                  onClick={() => setInterval(iv)}
+                  onClick={() => selectInterval(iv)}
                   className={`px-2 py-1 text-[12px] transition-colors cursor-pointer ${
                     i > 0 ? 'border-l border-border' : ''
                   } ${interval === iv ? 'bg-bg-tertiary text-text' : 'text-text-muted hover:text-text'}`}
