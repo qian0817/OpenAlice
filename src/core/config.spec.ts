@@ -218,32 +218,68 @@ describe('readAccountsConfig', () => {
     expect(mockWriteFile).toHaveBeenCalledTimes(1)
   })
 
-  it('parses ccxt account from file', async () => {
-    fileReturns([{ id: 'bybit-main', type: 'ccxt', exchange: 'bybit', apiKey: 'key1', apiSecret: 'sec1' }])
+  it('parses preset-shaped accounts from file', async () => {
+    fileReturns([
+      { id: 'okx-main', presetId: 'okx', enabled: true, guards: [], presetConfig: { mode: 'live', apiKey: 'k', secret: 's', password: 'p' } },
+      { id: 'alpaca-paper', presetId: 'alpaca', enabled: true, guards: [], presetConfig: { mode: 'paper', apiKey: 'k', apiSecret: 's' } },
+    ])
     const accounts = await readAccountsConfig()
-    expect(accounts).toHaveLength(1)
-    expect(accounts[0].id).toBe('bybit-main')
-    expect(accounts[0].type).toBe('ccxt')
+    expect(accounts).toHaveLength(2)
+    expect(accounts[0].presetId).toBe('okx')
+    expect(accounts[1].presetId).toBe('alpaca')
   })
 
-  it('parses alpaca account from file', async () => {
-    fileReturns([{ id: 'alpaca-paper', type: 'alpaca', paper: true, apiKey: 'k', apiSecret: 's' }])
+  it('auto-migrates pre-preset (legacy) ccxt shape and backs up the original', async () => {
+    fileReturns([
+      { id: 'okx-live', type: 'ccxt', enabled: true, guards: [], brokerConfig: { exchange: 'okx', sandbox: false, apiKey: 'k', apiSecret: 's', password: 'p' } },
+      { id: 'okx-demo', type: 'ccxt', enabled: true, guards: [], brokerConfig: { exchange: 'okx', sandbox: true, apiKey: 'k', apiSecret: 's', password: 'p' } },
+      { id: 'bybit-test', type: 'ccxt', enabled: true, guards: [], brokerConfig: { exchange: 'bybit', sandbox: true, apiKey: 'k', apiSecret: 's' } },
+    ])
     const accounts = await readAccountsConfig()
-    expect(accounts).toHaveLength(1)
-    expect(accounts[0].type).toBe('alpaca')
+    expect(accounts).toHaveLength(3)
+    expect(accounts[0]).toMatchObject({ id: 'okx-live', presetId: 'okx', presetConfig: { mode: 'live' } })
+    expect(accounts[1]).toMatchObject({ id: 'okx-demo', presetId: 'okx', presetConfig: { mode: 'demo' } })
+    expect(accounts[2]).toMatchObject({ id: 'bybit-test', presetId: 'bybit', presetConfig: { mode: 'testnet' } })
+    // CCXT secret alias (apiSecret → secret)
+    expect(accounts[0].presetConfig.secret).toBe('s')
+    // Backup + rewritten accounts.json both written
+    const writePaths = mockWriteFile.mock.calls.map((c) => c[0] as string)
+    expect(writePaths.some((p) => p.endsWith('accounts.json.backup-pre-preset'))).toBe(true)
+    expect(writePaths.some((p) => p.endsWith('accounts.json'))).toBe(true)
+  })
+
+  it('migrates legacy alpaca + ibkr accounts', async () => {
+    fileReturns([
+      { id: 'alp', type: 'alpaca', enabled: true, guards: [], brokerConfig: { paper: true, apiKey: 'k', apiSecret: 's' } },
+      { id: 'ibk', type: 'ibkr', enabled: true, guards: [], brokerConfig: { host: '127.0.0.1', port: 7497, clientId: 0 } },
+    ])
+    const accounts = await readAccountsConfig()
+    expect(accounts[0]).toMatchObject({ presetId: 'alpaca', presetConfig: { mode: 'paper' } })
+    expect(accounts[1]).toMatchObject({ presetId: 'ibkr-tws', presetConfig: { host: '127.0.0.1', port: 7497 } })
+  })
+
+  it('falls back to ccxt-custom for unknown ccxt exchanges', async () => {
+    fileReturns([
+      { id: 'kc', type: 'ccxt', enabled: true, guards: [], brokerConfig: { exchange: 'kucoin', apiKey: 'k', apiSecret: 's', password: 'p' } },
+    ])
+    const accounts = await readAccountsConfig()
+    expect(accounts[0]).toMatchObject({ presetId: 'ccxt-custom', presetConfig: { exchange: 'kucoin', secret: 's' } })
   })
 })
 
 describe('writeAccountsConfig', () => {
   it('writes validated accounts to accounts.json', async () => {
-    await writeAccountsConfig([{ id: 'acc-1', type: 'alpaca', enabled: true, guards: [], brokerConfig: { paper: true } }])
+    await writeAccountsConfig([{
+      id: 'acc-1', presetId: 'alpaca', enabled: true, guards: [],
+      presetConfig: { mode: 'paper', apiKey: 'k', apiSecret: 's' },
+    }])
     const filePath = mockWriteFile.mock.calls[0][0] as string
     expect(filePath).toMatch(/accounts\.json$/)
   })
 
   it('throws ZodError for missing required fields', async () => {
     await expect(
-      writeAccountsConfig([{ type: 'alpaca' } as any])
+      writeAccountsConfig([{ presetId: 'alpaca' } as any])
     ).rejects.toThrow()
     expect(mockWriteFile).not.toHaveBeenCalled()
   })
