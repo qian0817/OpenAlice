@@ -1,6 +1,31 @@
 import { fetchJson } from './client'
 import type { TradingAccount, AccountSummary, AccountInfo, Position, WalletCommitLog, ReconnectResult, AccountConfig, WalletStatus, WalletPushResult, WalletRejectResult, TestConnectionResult, BrokerTypeInfo, BrokerConfigField, UTASnapshotSummary, EquityCurvePoint } from './types'
 
+/** One contract returned by the broker-side fuzzy search. Shape mirrors what
+ *  the AI tool emits — same canonical aliceId for downstream order routing. */
+export interface ContractSearchHit {
+  source: string
+  contract: {
+    aliceId?: string
+    symbol?: string
+    secType?: string
+    exchange?: string
+    primaryExchange?: string
+    currency?: string
+    localSymbol?: string
+    description?: string
+    [key: string]: unknown
+  }
+  derivativeSecTypes: string[]
+}
+
+export interface ContractSearchResponse {
+  results: ContractSearchHit[]
+  count: number
+  /** 0 when no UTAs are configured; lets the UI nudge towards /trading/config. */
+  accountsConfigured?: number
+}
+
 // ==================== Unified Trading API ====================
 
 export const tradingApi = {
@@ -147,6 +172,26 @@ export const tradingApi = {
     if (opts?.startTime) params.set('startTime', opts.startTime)
     if (opts?.endTime) params.set('endTime', opts.endTime)
     return fetchJson(`/api/trading/snapshots/equity-curve?${params}`)
+  },
+
+  // ==================== Contract search ====================
+
+  /**
+   * Heuristic broker-side search across all configured accounts. Used by the
+   * Market workbench to surface tradeable contracts matching a data-vendor
+   * symbol — the bridge is intentionally fuzzy / display-only.
+   *
+   * `assetClass` lets the backend pick the right normalization rule (e.g.
+   * crypto/currency strip the quote-currency suffix). See
+   * `src/domain/trading/contract-search-rules.md` for the rule set.
+   */
+  async searchContracts(
+    pattern: string,
+    assetClass?: 'equity' | 'crypto' | 'currency' | 'commodity',
+  ): Promise<ContractSearchResponse> {
+    const qs = new URLSearchParams({ pattern })
+    if (assetClass) qs.set('assetClass', assetClass)
+    return fetchJson(`/api/trading/contracts/search?${qs}`)
   },
 
   // ==================== Connection Testing ====================

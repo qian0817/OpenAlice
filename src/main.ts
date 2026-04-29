@@ -427,11 +427,29 @@ async function main() {
 
   console.log('engine: started')
 
+  // ==================== Broker catalog refresh ====================
+  // Brokers that cache their catalog locally (Alpaca, CCXT, Mock) need
+  // periodic refreshes so newly listed assets surface in search and
+  // delisted ones drop. The optional `refreshCatalog` is a no-op for
+  // brokers that don't cache (IBKR — server-side reqMatchingSymbols).
+  const CATALOG_REFRESH_MS = 6 * 60 * 60 * 1000  // 6h
+  const catalogRefreshTimer = setInterval(() => {
+    for (const uta of accountManager.resolve()) {
+      uta.refreshCatalog().catch((err) => {
+        console.warn(`[catalog-refresh] ${uta.id} failed:`, err instanceof Error ? err.message : err)
+      })
+    }
+  }, CATALOG_REFRESH_MS)
+  // Don't keep the process alive just for the refresh loop — shutdown logic
+  // below clears it anyway, this is belt-and-braces for clean Node exit.
+  catalogRefreshTimer.unref?.()
+
   // ==================== Shutdown ====================
 
   let stopped = false
   const shutdown = async () => {
     stopped = true
+    clearInterval(catalogRefreshTimer)
     newsCollector?.stop()
     snapshotScheduler.stop()
     heartbeat.stop()
