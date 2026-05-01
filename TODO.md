@@ -229,4 +229,31 @@ the item when done — git log is the history.
       Those should be fixed independently regardless of whether the
       watcher project ever lands.
 
+## Brokers — others/leverup
+
+- [ ] LeverUp limit orders. The OCT relayer doc only exposes
+      `send-open-position` (market) and `send-close-position`. Limit
+      orders require either (a) a future LeverUp OCT endpoint or (b)
+      a separate on-chain code path calling
+      `openLimitOrderWithPyth(OpenDataInput, priceUpdateData)` directly
+      via viem walletClient (which brings back gas/Pyth-fee complexity
+      we deliberately punted). Currently `placeOrder` rejects non-MKT.
+- [ ] LeverUp partial close. `closeTrade(bytes32)` is whole-position;
+      LeverUp protocol doesn't expose a partial-close primitive yet.
+      `closePosition(qty)` ignores qty and closes the matched position
+      in full. Add when LeverUp adds it.
+- [ ] LeverUp EIP-712 type schema verification. Docs ship two
+      conflicting versions (flat `OneClickOpenPosition` vs nested
+      `OneClickOpenDataInput`). Current code defaults to nested per
+      the doc's viem code example; first real testnet round-trip
+      should confirm. Once verified, delete the losing variant from
+      `eip712.ts` and the variant flip-test from the spec.
+- [ ] LeverUp testnet pair list. Currently `TESTNET_PAIRS` aliases to
+      `MAINNET_PAIRS`. Confirm with Monad team whether testnet hosts
+      the same 23 pairs at the same addresses or a subset; replace
+      placeholder if needed.
+- [ ] LeverUp `unrealizedPnL` from positions REST is currently 0 in
+      `getPositions()`. Compute from (mark - entry) * qty * direction
+      once we have a stable mark-price source for non-Pyth-feed pairs.
+
 ## (seed more areas as they come up)

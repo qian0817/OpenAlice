@@ -14,7 +14,7 @@ import { z } from 'zod'
 
 // ==================== Types ====================
 
-export type BrokerEngine = 'ccxt' | 'alpaca' | 'ibkr'
+export type BrokerEngine = 'ccxt' | 'alpaca' | 'ibkr' | 'leverup'
 
 export interface ModeOption {
   id: string
@@ -323,6 +323,40 @@ export const IBKR_PRESET: BrokerPresetDef = {
   isPaper: (d) => Number(d.port) === 7497 || Number(d.port) === 4002,
 }
 
+// ==================== Other ecosystem brokers (lower-tier, isolated) ====================
+
+export const LEVERUP_PRESET: BrokerPresetDef = {
+  id: 'leverup-monad',
+  label: 'LeverUp (Monad)',
+  description: 'LeverUp perp DEX on Monad. EIP-712 signed orders relayed via One-Click Trading; relayer pays gas + Pyth oracle fees.',
+  category: 'crypto',
+  hint: `Setup at app.leverup.xyz before filling this form:
+
+1. Approve USDC spending to the LeverUp contract (one-time, required to open positions)
+2. Authorize the wallet you'll paste below as a **Trader Agent** on the OneClickAgent contract
+
+Paste the **private key of the authorized wallet** below. LeverUp's team confirmed a main wallet works directly here — anything pasted below has full control over its funds. Use a wallet whose balance you're comfortable with this app touching.`,
+  defaultName: 'leverup-main',
+  badge: 'LU',
+  badgeColor: 'text-accent',
+  engine: 'leverup',
+  guardCategory: 'crypto',
+  modes: [
+    { id: 'live', label: 'Mainnet' },
+    { id: 'testnet', label: 'Testnet' },
+  ],
+  zodSchema: z.object({
+    mode: z.enum(['live', 'testnet']).default('testnet').describe('Network'),
+    privateKey: z.string().regex(/^0x[a-fA-F0-9]{64}$/).describe('Wallet Private Key'),
+  }),
+  subtitleFields: [{ field: 'mode', prefix: 'LeverUp · ' }],
+  writeOnlyFields: ['privateKey'],
+  toEngineConfig: (d) => ({
+    network: d.mode,
+    privateKey: d.privateKey,
+  }),
+}
+
 // ==================== Catalog ====================
 
 export const BROKER_PRESET_CATALOG: BrokerPresetDef[] = [
@@ -334,6 +368,8 @@ export const BROKER_PRESET_CATALOG: BrokerPresetDef[] = [
   // Securities
   ALPACA_PRESET,
   IBKR_PRESET,
+  // Other ecosystem (favor-return tier)
+  LEVERUP_PRESET,
   // Escape hatch (untested exchanges)
   CCXT_CUSTOM_PRESET,
 ]

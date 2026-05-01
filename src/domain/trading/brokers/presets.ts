@@ -24,7 +24,7 @@ export interface SerializedBrokerPreset {
   defaultName: string
   badge: string
   badgeColor: string
-  engine: 'ccxt' | 'alpaca' | 'ibkr'
+  engine: 'ccxt' | 'alpaca' | 'ibkr' | 'leverup'
   guardCategory: 'crypto' | 'securities'
   modes?: ModeOption[]
   subtitleFields: SubtitleSegment[]
