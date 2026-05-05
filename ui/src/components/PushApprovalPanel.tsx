@@ -190,7 +190,7 @@ export function PushApprovalPanel() {
   const hasHistory = history.length > 0
 
   return (
-    <div className="h-full border-l border-border bg-bg-secondary/30 flex flex-col min-h-0">
+    <div className="w-72 shrink-0 border-l border-border bg-bg-secondary/30 flex flex-col min-h-0">
       {/* Header */}
       <div className="px-4 py-3 border-b border-border flex items-center gap-2">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-text-muted">

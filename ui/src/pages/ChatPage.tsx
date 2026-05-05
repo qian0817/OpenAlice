@@ -1,5 +1,4 @@
 import { useEffect, useLayoutEffect, useRef, useCallback, useState } from 'react'
-import { Panel, Group as PanelGroup } from 'react-resizable-panels'
 import { useChat } from '../hooks/useChat'
 import { useChannels } from '../contexts/ChannelsContext'
 import { ChatMessage, ToolCallGroup, ThinkingIndicator, StreamingToolGroup } from '../components/ChatMessage'
@@ -132,9 +131,8 @@ export function ChatPage() {
   }, [])
 
   return (
-    <PanelGroup orientation="horizontal" id="chat-layout" className="flex-1 min-h-0">
-      <Panel defaultSize={70} minSize={40} className="flex flex-col min-h-0">
-        <div className="flex flex-col flex-1 min-h-0 max-w-[800px] mx-auto w-full">
+    <div className="flex flex-1 min-h-0">
+      <div className="flex flex-col flex-1 min-h-0 max-w-[800px] mx-auto w-full">
         {/* Messages area */}
         <div className="flex-1 min-h-0 relative">
           <div ref={containerRef} className="h-full overflow-y-auto px-5 py-6">
@@ -266,11 +264,8 @@ export function ChatPage() {
 
         {/* Input */}
         <ChatInput disabled={isWaiting} onSend={send} />
-        </div>
-      </Panel>
-      <Panel defaultSize={30} minSize={20} className="flex flex-col min-h-0">
-        <PushApprovalPanel />
-      </Panel>
-    </PanelGroup>
+      </div>
+      <PushApprovalPanel />
+    </div>
   )
 }

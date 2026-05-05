@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { Panel, Group as PanelGroup } from 'react-resizable-panels'
 import { Sidebar } from './components/Sidebar'
 import { SecondarySidebar } from './components/SecondarySidebar'
 import { ChannelConfigModal } from './components/ChannelConfigModal'
@@ -70,25 +69,20 @@ function AppShell() {
           <span className="text-sm font-semibold text-text">OpenAlice</span>
         </div>
 
-        <PanelGroup orientation="vertical" id="app-main" className="flex-1 min-h-0">
-          <Panel defaultSize={100} className="flex flex-col min-h-0">
-            <div key={location.pathname} className="page-fade-in flex-1 flex flex-col min-h-0">
-              <Routes>
-                {SECTIONS.flatMap((s) => s.routes).map((r) => (
-                  <Route key={r.path} path={r.path} element={r.element} />
-                ))}
-                {STANDALONE_ROUTES.map((r) => (
-                  <Route key={r.path} path={r.path} element={r.element} />
-                ))}
-                {REDIRECT_ROUTES.map((r) => (
-                  <Route key={r.path} path={r.path} element={r.element} />
-                ))}
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </div>
-          </Panel>
-          {/* Future: bottom panel slot (terminal / output) — add another <Panel> + <PanelResizeHandle /> here */}
-        </PanelGroup>
+        <div key={location.pathname} className="page-fade-in flex-1 flex flex-col min-h-0">
+          <Routes>
+            {SECTIONS.flatMap((s) => s.routes).map((r) => (
+              <Route key={r.path} path={r.path} element={r.element} />
+            ))}
+            {STANDALONE_ROUTES.map((r) => (
+              <Route key={r.path} path={r.path} element={r.element} />
+            ))}
+            {REDIRECT_ROUTES.map((r) => (
+              <Route key={r.path} path={r.path} element={r.element} />
+            ))}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </div>
       </main>
 
       <ChannelDialogMount />
