@@ -270,13 +270,26 @@ function MarkPricesSection({ utaId, state, run, loading }: {
   const [newPrice, setNewPrice] = useState('')
 
   // Sync drafts with incoming state, preserving any in-flight user edits.
+  // A "no draft for key" → input shows current state.price; once the user
+  // types, the draft for that key holds their typed value until they
+  // commit (Set/Tick) or some other code path explicitly clears it.
   useEffect(() => {
     setDrafts((prev) => {
       const next: Record<string, string> = {}
-      for (const m of state.markPrices) next[m.nativeKey] = prev[m.nativeKey] ?? m.price
+      for (const m of state.markPrices) {
+        if (prev[m.nativeKey] !== undefined) next[m.nativeKey] = prev[m.nativeKey]
+      }
       return next
     })
   }, [state.markPrices])
+
+  // After a successful action on `key`, drop its draft so the input
+  // re-syncs to the freshly-fetched state.price on the next render.
+  const dropDraft = (key: string) => setDrafts((d) => {
+    const next = { ...d }
+    delete next[key]
+    return next
+  })
 
   return (
     <Section
@@ -310,24 +323,36 @@ function MarkPricesSection({ utaId, state, run, loading }: {
                     <button
                       disabled={loading}
                       onClick={() => run(
-                        `Set ${m.nativeKey} = ${drafts[m.nativeKey]}`,
-                        () => simulatorApi.setMarkPrice(utaId, m.nativeKey, drafts[m.nativeKey] ?? m.price),
+                        `Set ${m.nativeKey} = ${drafts[m.nativeKey] ?? m.price}`,
+                        async () => {
+                          await simulatorApi.setMarkPrice(utaId, m.nativeKey, drafts[m.nativeKey] ?? m.price)
+                          dropDraft(m.nativeKey)
+                        },
                       )}
                       className="btn-secondary-xs"
                     >Set</button>
                     <button
                       disabled={loading}
-                      onClick={() => run(`${m.nativeKey} −1%`, () => simulatorApi.tickPrice(utaId, m.nativeKey, -1))}
+                      onClick={() => run(`${m.nativeKey} −1%`, async () => {
+                        await simulatorApi.tickPrice(utaId, m.nativeKey, -1)
+                        dropDraft(m.nativeKey)
+                      })}
                       className="btn-secondary-xs"
                     >−1%</button>
                     <button
                       disabled={loading}
-                      onClick={() => run(`${m.nativeKey} +1%`, () => simulatorApi.tickPrice(utaId, m.nativeKey, 1))}
+                      onClick={() => run(`${m.nativeKey} +1%`, async () => {
+                        await simulatorApi.tickPrice(utaId, m.nativeKey, 1)
+                        dropDraft(m.nativeKey)
+                      })}
                       className="btn-secondary-xs"
                     >+1%</button>
                     <button
                       disabled={loading}
-                      onClick={() => run(`${m.nativeKey} +5%`, () => simulatorApi.tickPrice(utaId, m.nativeKey, 5))}
+                      onClick={() => run(`${m.nativeKey} +5%`, async () => {
+                        await simulatorApi.tickPrice(utaId, m.nativeKey, 5)
+                        dropDraft(m.nativeKey)
+                      })}
                       className="btn-secondary-xs"
                     >+5%</button>
                   </td>
