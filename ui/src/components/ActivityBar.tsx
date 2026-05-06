@@ -1,12 +1,11 @@
 import { type ReactNode } from 'react'
 import { type Page } from '../App'
 import { useWorkspace } from '../tabs/store'
-import type { ActivitySection } from '../tabs/types'
+import type { ActivitySection, ViewSpec } from '../tabs/types'
 
 /**
  * Map ActivityBar page enum (visual layout grouping) to the ActivitySection
- * used by the workspace store. Names are 1:1 except for Market, which is
- * `market` in store but `'market'` page label.
+ * used by the workspace store. Names are 1:1.
  */
 function activitySectionFor(page: Page): ActivitySection {
   switch (page) {
@@ -33,6 +32,20 @@ interface NavLeaf {
   page: Page
   label: string
   icon: (active: boolean) => ReactNode
+  /**
+   * What tab opens when this ActivityBar item is clicked.
+   *
+   * - **Set**: clicking the icon both reveals the sidebar AND opens (or
+   *   focuses) this tab. Used for activities with a meaningful default
+   *   landing page — e.g. Portfolio's Overview, Diary, News, Automation.
+   * - **Omitted**: sidebar-only activity. Click reveals the sidebar; tabs
+   *   are created from sidebar interactions. Used when there's no canonical
+   *   "all of X" view (Chat, Settings, Dev) or no tab at all (Trading-as-Git).
+   *
+   * Same-section re-click always collapses the sidebar regardless of this
+   * field; the focused tab isn't touched on collapse.
+   */
+  defaultTab?: ViewSpec
 }
 
 interface NavSection {
@@ -56,6 +69,7 @@ const NAV_SECTIONS: NavSection[] = [
       {
         page: 'portfolio',
         label: 'Portfolio',
+        defaultTab: { kind: 'portfolio', params: {} },
         icon: (active) => (
           <svg width="18" height="18" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
@@ -94,6 +108,7 @@ const NAV_SECTIONS: NavSection[] = [
       {
         page: 'news',
         label: 'News',
+        defaultTab: { kind: 'news', params: {} },
         icon: (active) => (
           <svg width="18" height="18" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9h4" />
@@ -106,6 +121,7 @@ const NAV_SECTIONS: NavSection[] = [
       {
         page: 'diary',
         label: 'Diary',
+        defaultTab: { kind: 'diary', params: {} },
         icon: (active) => (
           <svg width="18" height="18" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
@@ -121,6 +137,7 @@ const NAV_SECTIONS: NavSection[] = [
       {
         page: 'automation',
         label: 'Automation',
+        defaultTab: { kind: 'automation', params: {} },
         icon: (active) => (
           <svg width="18" height="18" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
@@ -165,7 +182,8 @@ const INDICATOR_STYLE = { background: '#58a6ff' }
 
 export function ActivityBar({ open, onClose }: ActivityBarProps) {
   const selectedSidebar = useWorkspace((state) => state.selectedSidebar)
-  const toggleSidebar = useWorkspace((state) => state.toggleSidebar)
+  const setSidebar = useWorkspace((state) => state.setSidebar)
+  const openOrFocus = useWorkspace((state) => state.openOrFocus)
 
   return (
     <>
@@ -214,7 +232,19 @@ export function ActivityBar({ open, onClose }: ActivityBarProps) {
                   const isActive = selectedSidebar === sec
                   const handleClick = () => {
                     onClose()
-                    toggleSidebar(sec)
+                    if (selectedSidebar === sec) {
+                      // Same section re-clicked: toggle sidebar off. Don't
+                      // touch the focused tab — collapsing the sidebar
+                      // shouldn't change what's in the editor.
+                      setSidebar(null)
+                    } else {
+                      setSidebar(sec)
+                      // Activities with a meaningful default landing (e.g.
+                      // Portfolio overview) jump straight to it. Sidebar-only
+                      // activities (Chat, Settings, Trading-as-Git, …) leave
+                      // tab focus alone — user picks from the sidebar.
+                      if (item.defaultTab) openOrFocus(item.defaultTab)
+                    }
                   }
                   return (
                     <button
