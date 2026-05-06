@@ -162,6 +162,7 @@ const devTabTitle: Record<Extract<ViewSpec, { kind: 'dev' }>['params']['tab'], s
   sessions: 'Sessions',
   snapshots: 'Snapshots',
   logs: 'Logs',
+  simulator: 'Simulator',
 }
 
 const devModule: ViewModule<'dev'> = {

@@ -243,6 +243,10 @@ function CreateWizard({ presets, existingUTAIds, onSave, onClose }: {
     () => presets.filter(p => p.category === 'crypto').map(toOption),
     [presets],
   )
+  const testingOptions: SDKOption[] = useMemo(
+    () => presets.filter(p => p.category === 'testing').map(toOption),
+    [presets],
+  )
 
   const buildUTA = (): UTAConfig | null => {
     if (!preset) return null
@@ -332,6 +336,12 @@ function CreateWizard({ presets, existingUTAIds, onSave, onClose }: {
               <section className="space-y-3">
                 <PickerSectionHeader title="Crypto" />
                 <SDKSelector options={cryptoOptions} selected={presetId ?? ''} onSelect={handlePick} />
+              </section>
+            )}
+            {testingOptions.length > 0 && (
+              <section className="space-y-3">
+                <PickerSectionHeader title="Testing" />
+                <SDKSelector options={testingOptions} selected={presetId ?? ''} onSelect={handlePick} />
               </section>
             )}
           </div>

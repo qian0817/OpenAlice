@@ -4,8 +4,16 @@
  * Same level as CcxtBroker/AlpacaBroker — a full behavioral implementation,
  * not just vi.fn() stubs. Internally all-Decimal for precision guarantees.
  *
- * Market orders fill immediately. Limit orders go to pending (use
- * fillPendingOrder() to trigger fills in tests).
+ * Market orders fill immediately at current markPrice. Limit/stop orders
+ * sit Submitted until either (a) `setMarkPrice()` 触达 the trigger price
+ * (auto-match), or (b) the simulator manually calls `fillOrder(orderId)`.
+ *
+ * Beyond IBroker, MockBroker exposes a "simulator control panel" — methods
+ * not on the IBroker interface that let test/dev surfaces inject god-view
+ * events: change markPrice, fill or partially fill pending orders, simulate
+ * external deposits/withdrawals (空投, transfer-in) and external trades
+ * (user manually trading on the exchange app outside Alice). Routes/UI
+ * call these to drive scenarios without going through `placeOrder`.
  */
 
 import { z } from 'zod'
@@ -130,11 +138,16 @@ export function makePlaceOrderResult(overrides: Partial<PlaceOrderResult> = {}):
 export class MockBroker implements IBroker {
   // ---- Self-registration ----
 
-  static configSchema = z.object({})
-  static configFields: import('../types.js').BrokerConfigField[] = []
+  static configSchema = z.object({
+    cash: z.coerce.number().default(100_000),
+  })
+  static configFields: import('../types.js').BrokerConfigField[] = [
+    { name: 'cash', type: 'number', label: 'Starting cash (USD)', default: 100_000 },
+  ]
 
   static fromConfig(config: { id: string; label?: string; brokerConfig: Record<string, unknown> }): MockBroker {
-    return new MockBroker({ id: config.id, label: config.label })
+    const bc = MockBroker.configSchema.parse(config.brokerConfig)
+    return new MockBroker({ id: config.id, label: config.label, cash: bc.cash })
   }
 
   // ---- Instance ----
@@ -144,7 +157,8 @@ export class MockBroker implements IBroker {
 
   private _positions = new Map<string, InternalPosition>()
   private _orders = new Map<string, InternalOrder>()
-  private _quotes = new Map<string, number>()
+  /** Per-nativeKey markPrice. Replaces the legacy `_quotes` map. */
+  private _markPrices = new Map<string, Decimal>()
   private _cash: Decimal
   private _realizedPnL = new Decimal(0)
   private _nextOrderId = 1
@@ -231,10 +245,10 @@ export class MockBroker implements IBroker {
     const symbol = contract.aliceId ?? contract.symbol ?? 'unknown'
 
     if (isMarket) {
-      const price = this._quotes.get(contract.symbol ?? '') ?? 100
+      const price = this._markPriceFor(contract) ?? new Decimal(100)
 
       // Update position
-      this._applyFill(contract, side, qty, new Decimal(price))
+      this._applyFill(contract, side, qty, price)
 
       // Update cash
       const cost = qty.mul(price)
@@ -244,7 +258,7 @@ export class MockBroker implements IBroker {
       const filledOrder = this._cloneOrder(order, orderId)
       this._orders.set(orderId, {
         id: orderId, contract, order: filledOrder,
-        status: 'Filled', fillPrice: price,
+        status: 'Filled', fillPrice: price.toNumber(),
       })
 
       // Return submitted — actual fill status discovered via getOrder/sync
@@ -335,9 +349,7 @@ export class MockBroker implements IBroker {
     let unrealizedPnL = new Decimal(0)
     let marketValueAcc = new Decimal(0)
     for (const pos of this._positions.values()) {
-      const price = this._quotes.has(pos.contract.symbol ?? '')
-        ? new Decimal(this._quotes.get(pos.contract.symbol ?? '')!)
-        : pos.avgCost
+      const price = pos.marketPriceOverride ?? this._markPriceFor(pos.contract) ?? pos.avgCost
       const posValue = pos.quantity.mul(price)
       marketValueAcc = marketValueAcc.plus(posValue)
       unrealizedPnL = unrealizedPnL.plus(pos.quantity.mul(price.minus(pos.avgCost)))
@@ -357,10 +369,7 @@ export class MockBroker implements IBroker {
     this._checkFail('getPositions')
     const result: Position[] = []
     for (const pos of this._positions.values()) {
-      const price = pos.marketPriceOverride
-        ?? (this._quotes.has(pos.contract.symbol ?? '')
-          ? new Decimal(this._quotes.get(pos.contract.symbol ?? '')!)
-          : pos.avgCost)
+      const price = pos.marketPriceOverride ?? this._markPriceFor(pos.contract) ?? pos.avgCost
       result.push({
         contract: pos.contract,
         currency: pos.contract.currency || 'USD',
@@ -398,12 +407,12 @@ export class MockBroker implements IBroker {
 
   async getQuote(contract: Contract): Promise<Quote> {
     this._record('getQuote', [contract])
-    const price = this._quotes.get(contract.symbol ?? '') ?? 100
+    const price = this._markPriceFor(contract) ?? new Decimal(100)
     return {
       contract,
-      last: String(price),
-      bid: String(price - 0.01),
-      ask: String(price + 0.01),
+      last: price.toString(),
+      bid: price.minus('0.01').toString(),
+      ask: price.plus('0.01').toString(),
       volume: '1000000',
       timestamp: new Date(),
     }
@@ -421,7 +430,11 @@ export class MockBroker implements IBroker {
   // ==================== Contract identity ====================
 
   getNativeKey(contract: Contract): string {
-    return contract.symbol
+    // Prefer localSymbol so multi-family scenarios (BTC spot vs BTC perp)
+    // can coexist without colliding in the position/markPrice maps. Falls
+    // back to plain symbol for the common single-family case — preserves
+    // back-compat with existing tests that key off bare symbols.
+    return contract.localSymbol || contract.symbol
   }
 
   resolveNativeKey(nativeKey: string): Contract {
@@ -431,33 +444,283 @@ export class MockBroker implements IBroker {
     return c
   }
 
-  // ==================== Test helpers ====================
+  // ==================== Simulator control panel ====================
+  // Methods below are NOT part of IBroker. They expose a "god view" so test
+  // specs, the webui simulator route, and other dev surfaces can drive
+  // scenarios that real exchanges produce on their own (price moves,
+  // external transfers, manual fills). Keeping them on MockBroker (not on
+  // a separate interface) means anything holding `IBroker` ignores them
+  // entirely; the simulator route narrows via `instanceof MockBroker`.
 
-  /** Inject a quote for a symbol. Used to control fill prices for market orders. */
-  setQuote(symbol: string, price: number): void {
-    this._quotes.set(symbol, price)
+  /**
+   * Set the markPrice for a native key (= localSymbol or symbol). Auto-matches
+   * any pending limit/stop orders触达 the new price; fills happen at the
+   * markPrice (better-than-limit semantics). Returns the orderIds filled.
+   */
+  setMarkPrice(nativeKey: string, price: Decimal | string | number): string[] {
+    const decimalPrice = price instanceof Decimal ? price : new Decimal(price)
+    this._markPrices.set(nativeKey, decimalPrice)
+    return this._matchPendingOrders(nativeKey, decimalPrice)
   }
 
-  /** Manually fill a pending limit order at the given price. */
-  fillPendingOrder(orderId: string, price: number): void {
+  /** Move a markPrice by a relative percent (e.g. +5 = up 5%). */
+  tickPrice(nativeKey: string, deltaPercent: number): string[] {
+    const current = this._markPrices.get(nativeKey)
+    if (!current) {
+      throw new Error(`MockBroker[${this.id}]: tickPrice — no markPrice for ${nativeKey}; call setMarkPrice first`)
+    }
+    const next = current.mul(new Decimal(100).plus(deltaPercent)).div(100)
+    return this.setMarkPrice(nativeKey, next)
+  }
+
+  /** Read the current markPrice for a native key (returns null if unset). */
+  getMarkPrice(nativeKey: string): Decimal | null {
+    return this._markPrices.get(nativeKey) ?? null
+  }
+
+  /** Manually fill a pending order. Optional price (defaults to markPrice or limit price); optional qty for partial. */
+  fillOrder(orderId: string, opts: { price?: Decimal | string | number; qty?: Decimal | string | number } = {}): void {
     const internal = this._orders.get(orderId)
-    if (!internal || internal.status !== 'Submitted') return
-    internal.status = 'Filled'
-    internal.fillPrice = price
+    if (!internal || internal.status !== 'Submitted') {
+      throw new Error(`MockBroker[${this.id}]: fillOrder — ${orderId} not pending`)
+    }
 
-    const qty = internal.order.totalQuantity
+    const fillQty = opts.qty != null
+      ? (opts.qty instanceof Decimal ? opts.qty : new Decimal(opts.qty))
+      : internal.order.totalQuantity
+    if (fillQty.lte(0)) throw new Error('fillOrder: qty must be positive')
+    if (fillQty.gt(internal.order.totalQuantity)) {
+      throw new Error('fillOrder: qty exceeds order totalQuantity')
+    }
+
+    const price = opts.price != null
+      ? (opts.price instanceof Decimal ? opts.price : new Decimal(opts.price))
+      : (this._markPriceFor(internal.contract)
+        ?? (!internal.order.lmtPrice.equals(UNSET_DECIMAL) ? internal.order.lmtPrice : new Decimal(100)))
+
     const side = internal.order.action.toUpperCase()
-    this._applyFill(internal.contract, side, qty, new Decimal(price))
-
-    const cost = qty.mul(price)
+    this._applyFill(internal.contract, side, fillQty, price)
+    const cost = fillQty.mul(price)
     this._cash = side === 'BUY' ? this._cash.minus(cost) : this._cash.plus(cost)
+
+    const isPartial = fillQty.lt(internal.order.totalQuantity)
+    if (isPartial) {
+      // Reduce remaining qty; order stays Submitted for follow-up fills
+      internal.order.totalQuantity = internal.order.totalQuantity.minus(fillQty)
+    } else {
+      internal.status = 'Filled'
+      internal.fillPrice = price.toNumber()
+    }
+  }
+
+  /** Force-cancel a pending order (simulator surface; bypasses IBroker idempotency). */
+  cancelPendingOrder(orderId: string): void {
+    const internal = this._orders.get(orderId)
+    if (!internal) throw new Error(`MockBroker[${this.id}]: order ${orderId} not found`)
+    internal.status = 'Cancelled'
+  }
+
+  /**
+   * Simulate an external balance change Alice didn't initiate (空投, transfer-in,
+   * staking reward). Adds a position without going through the order pipeline
+   * and tags `avgCostSource: 'wallet'` so UTA's reconcile pipeline kicks in
+   * and synthesizes a `reconcileBalance` commit at observed markPrice — matching
+   * how CCXT spot synthesis behaves in real life.
+   *
+   * Cash is unchanged (deposit, not purchase).
+   */
+  externalDeposit(params: {
+    nativeKey: string
+    quantity: Decimal | string | number
+    contract?: Partial<Contract>
+  }): void {
+    const qty = params.quantity instanceof Decimal ? params.quantity : new Decimal(params.quantity)
+    if (qty.lte(0)) throw new Error('externalDeposit: quantity must be positive')
+
+    const existing = this._positions.get(params.nativeKey)
+    if (existing) {
+      existing.quantity = existing.quantity.plus(qty)
+      existing.avgCostSource = 'wallet'
+      return
+    }
+
+    const contract = new Contract()
+    contract.symbol = params.contract?.symbol ?? params.nativeKey
+    contract.localSymbol = params.contract?.localSymbol ?? params.nativeKey
+    contract.secType = params.contract?.secType ?? 'CRYPTO'
+    contract.exchange = params.contract?.exchange ?? 'MOCK'
+    contract.currency = params.contract?.currency ?? 'USD'
+    const markPrice = this._markPrices.get(params.nativeKey) ?? new Decimal(0)
+
+    this._positions.set(params.nativeKey, {
+      contract,
+      side: 'long',
+      quantity: qty,
+      avgCost: markPrice,
+      avgCostSource: 'wallet',
+    })
+  }
+
+  /** Simulate an external withdrawal (transfer-out, burn). Cash unchanged. */
+  externalWithdraw(nativeKey: string, quantity: Decimal | string | number): void {
+    const qty = quantity instanceof Decimal ? quantity : new Decimal(quantity)
+    const existing = this._positions.get(nativeKey)
+    if (!existing) throw new Error(`MockBroker[${this.id}]: no position at ${nativeKey}`)
+    existing.quantity = existing.quantity.minus(qty)
+    if (existing.quantity.lte(0)) {
+      this._positions.delete(nativeKey)
+    } else {
+      existing.avgCostSource = 'wallet'
+    }
+  }
+
+  /**
+   * Simulate the user manually trading on the exchange app (outside Alice's
+   * order log). Updates position + cash like a real fill, but tags the
+   * position as wallet-sourced so UTA reconciles via observed price.
+   */
+  externalTrade(params: {
+    nativeKey: string
+    side: 'BUY' | 'SELL'
+    quantity: Decimal | string | number
+    price: Decimal | string | number
+    contract?: Partial<Contract>
+  }): void {
+    const qty = params.quantity instanceof Decimal ? params.quantity : new Decimal(params.quantity)
+    const price = params.price instanceof Decimal ? params.price : new Decimal(params.price)
+    if (qty.lte(0)) throw new Error('externalTrade: quantity must be positive')
+
+    const existing = this._positions.get(params.nativeKey)
+    if (!existing && params.side === 'SELL') {
+      throw new Error(`MockBroker[${this.id}]: cannot externalTrade SELL — no position at ${params.nativeKey}`)
+    }
+
+    if (!existing) {
+      const contract = new Contract()
+      contract.symbol = params.contract?.symbol ?? params.nativeKey
+      contract.localSymbol = params.contract?.localSymbol ?? params.nativeKey
+      contract.secType = params.contract?.secType ?? 'CRYPTO'
+      contract.exchange = params.contract?.exchange ?? 'MOCK'
+      contract.currency = params.contract?.currency ?? 'USD'
+      this._positions.set(params.nativeKey, {
+        contract,
+        side: 'long',
+        quantity: qty,
+        avgCost: price,
+        avgCostSource: 'wallet',
+      })
+    } else {
+      this._applyFill(existing.contract, params.side, qty, price)
+      const after = this._positions.get(params.nativeKey)
+      if (after) after.avgCostSource = 'wallet'
+    }
+
+    const cashDelta = qty.mul(price)
+    this._cash = params.side === 'BUY' ? this._cash.minus(cashDelta) : this._cash.plus(cashDelta)
+  }
+
+  /**
+   * Snapshot of all simulator-relevant state. Used by the webui simulator tab
+   * to render the control console without piecing together separate calls.
+   */
+  getSimulatorState(): {
+    cash: string
+    markPrices: Array<{ nativeKey: string; price: string }>
+    positions: Array<{ nativeKey: string; symbol: string; localSymbol?: string; secType?: string; side: 'long' | 'short'; quantity: string; avgCost: string; avgCostSource?: 'broker' | 'wallet' }>
+    pendingOrders: Array<{ orderId: string; nativeKey: string; symbol: string; action: string; orderType: string; totalQuantity: string; lmtPrice?: string; auxPrice?: string }>
+  } {
+    return {
+      cash: this._cash.toString(),
+      markPrices: [...this._markPrices.entries()].map(([k, v]) => ({ nativeKey: k, price: v.toString() })),
+      positions: [...this._positions.entries()].map(([k, p]) => ({
+        nativeKey: k,
+        symbol: p.contract.symbol,
+        localSymbol: p.contract.localSymbol || undefined,
+        secType: p.contract.secType || undefined,
+        side: p.side,
+        quantity: p.quantity.toString(),
+        avgCost: p.avgCost.toString(),
+        avgCostSource: p.avgCostSource,
+      })),
+      pendingOrders: [...this._orders.values()]
+        .filter(o => o.status === 'Submitted')
+        .map(o => ({
+          orderId: o.id,
+          nativeKey: this.getNativeKey(o.contract),
+          symbol: o.contract.symbol,
+          action: o.order.action,
+          orderType: o.order.orderType,
+          totalQuantity: o.order.totalQuantity.toString(),
+          lmtPrice: !o.order.lmtPrice.equals(UNSET_DECIMAL) ? o.order.lmtPrice.toString() : undefined,
+          auxPrice: !o.order.auxPrice.equals(UNSET_DECIMAL) ? o.order.auxPrice.toString() : undefined,
+        })),
+    }
+  }
+
+  /**
+   * Walk pending orders for `nativeKey`, fill any whose trigger has been
+   * crossed by `price`. Called from setMarkPrice. Returns filled orderIds.
+   *
+   * Trigger semantics:
+   *  - LMT BUY: fills when markPrice <= lmtPrice (price came down to/below us)
+   *  - LMT SELL: fills when markPrice >= lmtPrice
+   *  - STP BUY: triggers when markPrice >= auxPrice (breakout up)
+   *  - STP SELL: triggers when markPrice <= auxPrice (breakdown)
+   * Fill price = markPrice (better-than-limit, like a real exchange).
+   */
+  private _matchPendingOrders(nativeKey: string, price: Decimal): string[] {
+    const filled: string[] = []
+    for (const internal of this._orders.values()) {
+      if (internal.status !== 'Submitted') continue
+      if (this.getNativeKey(internal.contract) !== nativeKey) continue
+
+      const order = internal.order
+      const side = order.action.toUpperCase()
+      const type = order.orderType
+      const lmt = !order.lmtPrice.equals(UNSET_DECIMAL) ? order.lmtPrice : null
+      const aux = !order.auxPrice.equals(UNSET_DECIMAL) ? order.auxPrice : null
+
+      let triggered = false
+      if (type === 'LMT' && lmt) {
+        triggered = side === 'BUY' ? price.lte(lmt) : price.gte(lmt)
+      } else if (type === 'STP' && aux) {
+        triggered = side === 'BUY' ? price.gte(aux) : price.lte(aux)
+      } else if (type === 'STP LMT' && aux) {
+        // Stop-limit: aux triggers, then becomes a limit at lmt. For mock we
+        // collapse: trigger fills at lmt (or aux if no lmt) — sufficient for
+        // simulation; precise stop-limit behaviour is out of scope.
+        triggered = side === 'BUY' ? price.gte(aux) : price.lte(aux)
+      }
+      if (!triggered) continue
+
+      this.fillOrder(internal.id, { price })
+      filled.push(internal.id)
+    }
+    return filled
+  }
+
+  /** Resolve markPrice for a contract via its nativeKey. */
+  private _markPriceFor(contract: Contract): Decimal | null {
+    return this._markPrices.get(this.getNativeKey(contract)) ?? null
+  }
+
+  // ==================== Legacy test helpers ====================
+
+  /** Legacy alias for setMarkPrice — number-typed price, no auto-match return. */
+  setQuote(symbol: string, price: number): void {
+    this.setMarkPrice(symbol, price)
+  }
+
+  /** Legacy alias for fillOrder. */
+  fillPendingOrder(orderId: string, price: number): void {
+    this.fillOrder(orderId, { price })
   }
 
   /** Override positions directly (for legacy test compatibility). */
   setPositions(positions: Position[]): void {
     this._positions.clear()
     for (const p of positions) {
-      const key = p.contract.aliceId ?? p.contract.symbol ?? 'unknown'
+      const key = this.getNativeKey(p.contract) || p.contract.aliceId || 'unknown'
       this._positions.set(key, {
         contract: p.contract,
         side: p.side,

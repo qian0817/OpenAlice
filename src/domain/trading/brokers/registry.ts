@@ -16,6 +16,7 @@ import { AlpacaBroker } from './alpaca/AlpacaBroker.js'
 import { IbkrBroker } from './ibkr/IbkrBroker.js'
 import { LeverupBroker } from './others/leverup/index.js'
 import { LongbridgeBroker } from './longbridge/index.js'
+import { MockBroker } from './mock/MockBroker.js'
 import type { BrokerEngine } from './preset-catalog.js'
 
 /** Minimal engine entry: just enough to validate + instantiate. */
@@ -46,5 +47,9 @@ export const BROKER_ENGINE_REGISTRY: Record<BrokerEngine, BrokerEngineEntry> = {
   longbridge: {
     configSchema: LongbridgeBroker.configSchema,
     fromConfig: LongbridgeBroker.fromConfig,
+  },
+  mock: {
+    configSchema: MockBroker.configSchema,
+    fromConfig: MockBroker.fromConfig,
   },
 }

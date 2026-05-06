@@ -20,6 +20,7 @@ import { createBrainRoutes } from './routes/brain.js'
 import { createTradingRoutes } from './routes/trading.js'
 import { createTradingConfigRoutes } from './routes/trading-config.js'
 import { createDevRoutes } from './routes/dev.js'
+import { createSimulatorRoutes } from './routes/simulator.js'
 import { createToolsRoutes } from './routes/tools.js'
 import { createAgentStatusRoutes } from './routes/agent-status.js'
 import { createPersonaRoutes } from './routes/persona.js'
@@ -108,6 +109,7 @@ export class WebPlugin implements Plugin {
     app.route('/api/trading/config', createTradingConfigRoutes(ctx))
     app.route('/api/trading', createTradingRoutes(ctx))
     app.route('/api/dev', createDevRoutes(ctx.connectorCenter))
+    app.route('/api/simulator', createSimulatorRoutes(ctx))
     app.route('/api/tools', createToolsRoutes(ctx.toolCenter))
     app.route('/api/agent-status', createAgentStatusRoutes(ctx))
     app.route('/api/news', createNewsRoutes(ctx))

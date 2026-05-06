@@ -14,7 +14,7 @@ import { z } from 'zod'
 
 // ==================== Types ====================
 
-export type BrokerEngine = 'ccxt' | 'alpaca' | 'ibkr' | 'leverup' | 'longbridge'
+export type BrokerEngine = 'ccxt' | 'alpaca' | 'ibkr' | 'leverup' | 'longbridge' | 'mock'
 
 export interface ModeOption {
   id: string
@@ -42,12 +42,13 @@ export interface BrokerPresetDef {
   description: string
   /**
    * Group in the picker UI. Wizard renders 'recommended' first, then
-   * 'crypto'. Securities + Longbridge HK + Hyperliquid sit in
-   * 'recommended' (Hyperliquid grandfathered for product-history reasons,
+   * 'crypto', then 'testing'. Securities + Longbridge HK + Hyperliquid sit
+   * in 'recommended' (Hyperliquid grandfathered for product-history reasons,
    * not because it's not crypto). Everything else crypto-native — incl.
-   * CCXT Custom — lands in 'crypto'.
+   * CCXT Custom — lands in 'crypto'. The Simulator preset (mock engine)
+   * lives alone in 'testing' so users can't conflate it with real-money brokers.
    */
-  category: 'recommended' | 'crypto'
+  category: 'recommended' | 'crypto' | 'testing'
   /** Optional explanatory text rendered with the form (mode-specific gotchas, etc.). */
   hint?: string
   /** Default account id suggested in the wizard (e.g., "okx-main"). */
@@ -397,6 +398,29 @@ Paste the **private key of the authorized wallet** below. LeverUp's team confirm
   }),
 }
 
+// ==================== Testing presets ====================
+
+export const SIMULATOR_PRESET: BrokerPresetDef = {
+  id: 'mock-simulator',
+  label: 'Simulator (testing only)',
+  description: 'In-memory mock broker with manual撮合. No real money, no exchange — use the Dev → Simulator panel to drive prices, fills, and external balance events.',
+  category: 'testing',
+  hint: 'For UI/AI repro testing only. Positions and orders live in process memory; **everything is wiped on dev server restart**. Connect via the Dev → Simulator panel to inject prices, manually撮合 limit orders, and simulate external transfers / off-platform trades.',
+  defaultName: 'simulator',
+  badge: 'SM',
+  badgeColor: 'text-text-muted',
+  engine: 'mock',
+  guardCategory: 'crypto',
+  zodSchema: z.object({
+    cash: z.coerce.number().default(100_000).describe('Starting cash (USD)'),
+  }),
+  subtitleFields: [
+    { field: 'cash', prefix: '$' },
+  ],
+  toEngineConfig: (d) => ({ cash: d.cash }),
+  isPaper: () => true,
+}
+
 // ==================== Catalog ====================
 
 // Order matters — the wizard renders presets top-down within each
@@ -419,6 +443,8 @@ export const BROKER_PRESET_CATALOG: BrokerPresetDef[] = [
   LEVERUP_PRESET,
   // Escape hatch — untested CCXT exchanges; lives at the end of Crypto.
   CCXT_CUSTOM_PRESET,
+  // ---- Testing ----
+  SIMULATOR_PRESET,
 ]
 
 /** Lookup by id. Throws if unknown. */
