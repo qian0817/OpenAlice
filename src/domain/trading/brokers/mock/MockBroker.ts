@@ -173,6 +173,14 @@ export class MockBroker implements IBroker {
   private _orders = new Map<string, InternalOrder>()
   /** Per-nativeKey markPrice. Replaces the legacy `_quotes` map. */
   private _markPrices = new Map<string, Decimal>()
+  /**
+   * Contracts seen via deposit / placeOrder / externalTrade, keyed by
+   * `getNativeKey(contract)`. `resolveNativeKey` looks up here first so
+   * orders against an aliceId for a previously-known instrument keep their
+   * full secType / strike / multiplier metadata even if the position was
+   * fully sold out of (i.e. removed from `_positions`).
+   */
+  private _contractRegistry = new Map<string, Contract>()
   private _cash: Decimal
   private _realizedPnL = new Decimal(0)
   private _nextOrderId = 1
@@ -259,27 +267,31 @@ export class MockBroker implements IBroker {
 
     if (isMarket) {
       const price = this._markPriceFor(contract) ?? new Decimal(100)
+      const mult = multiplierOf(contract)
 
-      // Update position
-      this._applyFill(contract, side, qty, price)
+      // Update position; on oversell `_applyFill` throws — match real broker
+      // convention by returning PlaceOrderResult.success=false rather than
+      // letting the exception escape to the caller.
+      try {
+        this._applyFill(contract, side, qty, price)
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) }
+      }
 
-      // Update cash
-      const cost = qty.mul(price)
+      // Cash flow honours multiplier: 1 OPT contract @ $58 with multiplier=100
+      // costs $5,800, not $58. IBroker contract requires this even though
+      // position.avgCost is per-unit.
+      const cost = qty.mul(price).mul(mult)
       this._cash = side === 'BUY' ? this._cash.minus(cost) : this._cash.plus(cost)
 
-      // Record order as filled
       const filledOrder = this._cloneOrder(order, orderId)
       this._orders.set(orderId, {
         id: orderId, contract, order: filledOrder,
         status: 'Filled', fillPrice: price.toNumber(),
       })
 
-      // Return submitted — actual fill status discovered via getOrder/sync
-      // (MockBroker executes internally but doesn't expose execution in response,
-      // matching real exchange async behavior)
       const orderState = new OrderState()
       orderState.status = 'Filled'
-
       return { success: true, orderId, orderState }
     }
 
@@ -458,8 +470,14 @@ export class MockBroker implements IBroker {
   }
 
   resolveNativeKey(nativeKey: string): Contract {
+    // Prefer the registry — preserves secType / strike / right / multiplier
+    // for contracts we've already observed, so re-ordering an OPT/FUT
+    // aliceId after a full sell-down still keeps the right metadata.
+    const remembered = this._contractRegistry.get(nativeKey)
+    if (remembered) return remembered
     const c = new Contract()
     c.symbol = nativeKey
+    c.localSymbol = nativeKey
     c.secType = 'STK'
     return c
   }
@@ -520,7 +538,7 @@ export class MockBroker implements IBroker {
 
     const side = internal.order.action.toUpperCase()
     this._applyFill(internal.contract, side, fillQty, price)
-    const cost = fillQty.mul(price)
+    const cost = fillQty.mul(price).mul(multiplierOf(internal.contract))
     this._cash = side === 'BUY' ? this._cash.minus(cost) : this._cash.plus(cost)
 
     const isPartial = fillQty.lt(internal.order.totalQuantity)
@@ -558,7 +576,19 @@ export class MockBroker implements IBroker {
     if (partial?.strike != null && partial.strike !== UNSET_DOUBLE) c.strike = partial.strike
     if (partial?.right) c.right = partial.right
     if (partial?.multiplier) c.multiplier = partial.multiplier
+    this._rememberContract(c)
     return c
+  }
+
+  /** Cache the contract under its native key so `resolveNativeKey` can
+   *  recover the full IBKR Contract metadata even after the position is
+   *  fully sold out of and removed from `_positions`. */
+  private _rememberContract(c: Contract): void {
+    const key = this.getNativeKey(c)
+    if (!key) return
+    if (!this._contractRegistry.has(key)) {
+      this._contractRegistry.set(key, c)
+    }
   }
 
   /**
@@ -644,7 +674,9 @@ export class MockBroker implements IBroker {
       if (after) after.avgCostSource = 'wallet'
     }
 
-    const cashDelta = qty.mul(price)
+    const positionForMult = this._positions.get(params.nativeKey)
+    const mult = positionForMult ? multiplierOf(positionForMult.contract) : new Decimal(1)
+    const cashDelta = qty.mul(price).mul(mult)
     this._cash = params.side === 'BUY' ? this._cash.minus(cashDelta) : this._cash.plus(cashDelta)
   }
 
@@ -805,13 +837,20 @@ export class MockBroker implements IBroker {
     // simulator-direct calls (externalDeposit/externalTrade — keyed by
     // user-supplied nativeKey, e.g. "BTC") land in the same map slot.
     const key = this.getNativeKey(contract)
+    this._rememberContract(contract)
     const existing = this._positions.get(key)
 
     if (!existing) {
-      // New position
+      if (side === 'SELL') {
+        // No position to sell. Real brokers reject oversell. Mock follows
+        // suit — flipping into a short here would silently fabricate cash
+        // and a wrong-direction position. Caller (placeOrder / externalTrade)
+        // catches and surfaces the rejection.
+        throw new Error(`MockBroker[${this.id}]: cannot SELL ${qty.toFixed()} ${key} — no existing position`)
+      }
       this._positions.set(key, {
         contract,
-        side: side === 'BUY' ? 'long' : 'short',
+        side: 'long',
         quantity: qty,
         avgCost: price,
       })
@@ -828,14 +867,17 @@ export class MockBroker implements IBroker {
       existing.quantity = existing.quantity.plus(qty)
       existing.avgCost = totalCost.div(existing.quantity)
     } else {
-      // Reduce/close position
+      // Reduce / close. Reject oversell — partial close OK, full flat OK,
+      // beyond-flat is the bug shape (cash phantom-credited via the caller).
       const remaining = existing.quantity.minus(qty)
-      if (remaining.lte(0)) {
-        // Fully closed (or flipped — for simplicity we just delete)
+      if (remaining.lt(0)) {
+        throw new Error(`MockBroker[${this.id}]: cannot ${side} ${qty.toFixed()} ${key} — only ${existing.quantity.toFixed()} held`)
+      }
+      if (remaining.isZero()) {
         this._positions.delete(key)
       } else {
         existing.quantity = remaining
-        // avgCost stays the same on partial close
+        // avgCost stays the same on partial close (WAC sell-down semantics).
       }
     }
   }

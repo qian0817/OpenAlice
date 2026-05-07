@@ -518,3 +518,111 @@ describe('position keying — placeOrder and externalDeposit converge', () => {
     expect(positions[0].quantity.toString()).toBe('1.5')
   })
 })
+
+// ==================== Multi-asset / multiplier discipline ====================
+//
+// IBroker.Position contract requires `marketValue` and `unrealizedPnL` to
+// be multiplier-applied at the broker layer; cash flow on BUY/SELL must
+// likewise debit/credit `qty × price × multiplier`. A live QA run on
+// 2026-05-07 found three bug shapes from violating this:
+//   1. cash flow missed multiplier (BUY 3 OPT @50 dropped $150 not $15,000)
+//   2. resolveNativeKey returned a STK stub, losing secType/multiplier
+//      when re-ordering an aliceId after a position was sold flat
+//   3. oversell silently filled (SELL 999 BTC against 0.01 BTC) and
+//      phantom-credited cash
+// These tests pin those down.
+
+describe('multiplier discipline (regression)', () => {
+  it('BUY of OPT contracts debits cash by qty × price × multiplier (×100)', async () => {
+    const Decimal = (await import('decimal.js')).default
+    const { Order, Contract } = await import('@traderalice/ibkr')
+
+    const acc = new MockBroker({ id: 'mock-paper', cash: 100_000 })
+    acc.setMarkPrice('AAPL-20260720-C150', 50)
+    // Seed position via deposit so OPT contract is in the registry
+    acc.externalDeposit({
+      nativeKey: 'AAPL-20260720-C150',
+      quantity: 1,
+      contract: {
+        symbol: 'AAPL', secType: 'OPT', localSymbol: 'AAPL-20260720-C150',
+        lastTradeDateOrContractMonth: '20260720', strike: 150, right: 'C', multiplier: '100',
+      },
+    })
+
+    // BUY 3 more contracts at premium 50 — should drop cash by 3 × 50 × 100 = 15,000
+    const cashBefore = (await acc.getAccount()).totalCashValue
+    const contract = acc.resolveNativeKey('AAPL-20260720-C150')
+    contract.aliceId = 'mock-paper|AAPL-20260720-C150'
+    const order = new Order()
+    order.action = 'BUY'
+    order.orderType = 'MKT'
+    order.totalQuantity = new Decimal(3)
+    await acc.placeOrder(contract, order)
+
+    const cashAfter = (await acc.getAccount()).totalCashValue
+    const dropped = new Decimal(cashBefore).minus(cashAfter)
+    expect(dropped.toNumber()).toBe(15_000)
+  })
+
+  it('resolveNativeKey returns the original Contract (preserves OPT metadata) after sell-down', async () => {
+    const Decimal = (await import('decimal.js')).default
+    const { Order } = await import('@traderalice/ibkr')
+
+    const acc = new MockBroker({ id: 'mock-paper', cash: 200_000 })
+    acc.setMarkPrice('AAPL-20260720-C150', 50)
+    acc.externalDeposit({
+      nativeKey: 'AAPL-20260720-C150',
+      quantity: 5,
+      contract: {
+        symbol: 'AAPL', secType: 'OPT', localSymbol: 'AAPL-20260720-C150',
+        lastTradeDateOrContractMonth: '20260720', strike: 150, right: 'C', multiplier: '100',
+      },
+    })
+
+    // Sell all 5 to clear the position from _positions
+    const sellContract = acc.resolveNativeKey('AAPL-20260720-C150')
+    sellContract.aliceId = 'mock-paper|AAPL-20260720-C150'
+    const sellOrder = new Order()
+    sellOrder.action = 'SELL'
+    sellOrder.orderType = 'MKT'
+    sellOrder.totalQuantity = new Decimal(5)
+    await acc.placeOrder(sellContract, sellOrder)
+    expect(await acc.getPositions()).toHaveLength(0)
+
+    // Re-resolve: registry must remember the OPT metadata.
+    const reresolved = acc.resolveNativeKey('AAPL-20260720-C150')
+    expect(reresolved.secType).toBe('OPT')
+    expect(reresolved.multiplier).toBe('100')
+    expect(reresolved.strike).toBe(150)
+    expect(reresolved.right).toBe('C')
+    expect(reresolved.lastTradeDateOrContractMonth).toBe('20260720')
+  })
+
+  it('SELL beyond held quantity rejects without phantom-crediting cash', async () => {
+    const Decimal = (await import('decimal.js')).default
+    const { Order } = await import('@traderalice/ibkr')
+
+    const acc = new MockBroker({ id: 'mock-paper', cash: 100_000 })
+    acc.setMarkPrice('BTC', 80_000)
+    acc.externalDeposit({ nativeKey: 'BTC', quantity: 0.01 })
+
+    const cashBefore = (await acc.getAccount()).totalCashValue
+
+    const contract = acc.resolveNativeKey('BTC')
+    contract.aliceId = 'mock-paper|BTC'
+    const order = new Order()
+    order.action = 'SELL'
+    order.orderType = 'MKT'
+    order.totalQuantity = new Decimal(999)
+
+    const result = await acc.placeOrder(contract, order)
+    expect(result.success).toBe(false)
+    expect(result.error).toMatch(/cannot SELL/i)
+
+    const cashAfter = (await acc.getAccount()).totalCashValue
+    expect(cashAfter).toBe(cashBefore)
+    const positions = await acc.getPositions()
+    expect(positions).toHaveLength(1)
+    expect(positions[0].quantity.toNumber()).toBeCloseTo(0.01)
+  })
+})

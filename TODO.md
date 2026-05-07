@@ -45,6 +45,18 @@ the item when done — git log is the history.
 
 ## Architecture
 
+- [ ] Extract `derivePositionMath(raw): { marketValue, unrealizedPnL }`
+      shared util. Today's IBroker contract requires every broker's
+      `getPositions` to multiply by `multiplier` when computing
+      marketValue / unrealizedPnL — but it's documentation-only, no
+      enforcement. Production brokers happen to dodge it because their
+      primary markets all have multiplier=1 (CCXT spot/perp) or the
+      upstream API hands back pre-multiplied values (Alpaca, IBKR).
+      First broker to grow custom OPT/FUT math will repeat Mock's
+      bug shape (cash-flow / marketValue / PnL all need multiplier).
+      Replace per-broker computation with one shared derive call;
+      brokers emit raw fields (qty, markPrice, multiplier, side,
+      avgCost) and downstream math is contract-uniform.
 - [ ] Unified config hot-reload. Right now every consumer of a config
       section has to solve "did the user edit this?" on its own —
       Telegram/MCP-Ask via `reconnectConnectors`, opentypebb via lazy
