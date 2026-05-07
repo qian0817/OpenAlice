@@ -154,7 +154,7 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
 /** Market data routes: POST /test-provider */
 export function createMarketDataRoutes(ctx: EngineContext) {
   const TEST_ENDPOINTS: Record<string, { credField: string; provider: string; model: string; params: Record<string, unknown> }> = {
-    fred:             { credField: 'fred_api_key',             provider: 'fred',             model: 'FredSearch',              params: { query: 'GDP' } },
+    fred:             { credField: 'federal_reserve_api_key',  provider: 'federal_reserve', model: 'FredSearch',              params: { query: 'GDP' } },
     bls:              { credField: 'bls_api_key',              provider: 'bls',              model: 'BlsSearch',               params: { query: 'unemployment' } },
     eia:              { credField: 'eia_api_key',              provider: 'eia',              model: 'ShortTermEnergyOutlook',  params: {} },
     econdb:           { credField: 'econdb_api_key',           provider: 'econdb',           model: 'AvailableIndicators',     params: {} },
