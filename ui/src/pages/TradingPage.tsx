@@ -69,14 +69,18 @@ export function TradingPage() {
       {showAdd && (
         <CreateWizard
           presets={presets}
-          existingUTAIds={tc.utas.map((a) => a.id)}
           onSave={async (uta) => {
-            await tc.saveUTA(uta)
-            const result = await tc.reconnectUTA(uta.id)
+            const created = await tc.createUTA(uta)
+            const result = await tc.reconnectUTA(created.id)
             if (!result.success) {
               throw new Error(result.error || 'Connection failed')
             }
             setShowAdd(false)
+            return created
+          }}
+          onOpenExisting={(id) => {
+            setShowAdd(false)
+            navigate(`/uta/${id}`)
           }}
           onClose={() => setShowAdd(false)}
         />
@@ -205,27 +209,32 @@ function PickerSectionHeader({ title }: { title: string }) {
 
 type WizardStep = 'pick' | 'config' | 'test'
 
-function CreateWizard({ presets, existingUTAIds, onSave, onClose }: {
+interface BrokerConflict {
+  existing: { id: string; label: string; presetId: string }
+}
+
+function CreateWizard({ presets, onSave, onOpenExisting, onClose }: {
   presets: BrokerPreset[]
-  existingUTAIds: string[]
-  onSave: (uta: UTAConfig) => Promise<void>
+  onSave: (uta: Omit<UTAConfig, 'id'>) => Promise<UTAConfig>
+  onOpenExisting: (id: string) => void
   onClose: () => void
 }) {
   const [step, setStep] = useState<WizardStep>('pick')
   const [presetId, setPresetId] = useState<string | null>(null)
-  const [id, setId] = useState('')
+  const [name, setName] = useState('')
   const [showSecrets, setShowSecrets] = useState(false)
   const [testing, setTesting] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [conflict, setConflict] = useState<BrokerConflict | null>(null)
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null)
 
   const preset = presets.find(p => p.id === presetId)
   const hasSensitive = preset?.schema && Object.values((preset.schema as { properties?: Record<string, { writeOnly?: boolean }> }).properties ?? {}).some(p => p.writeOnly)
   const { fields, formData, setField, getSubmitData, validate } = useSchemaForm(preset?.schema)
 
-  const defaultId = preset?.defaultName ?? ''
-  const finalId = id.trim() || defaultId
+  const defaultName = preset?.defaultName ?? ''
+  const finalName = name.trim() || defaultName
 
   const toOption = (p: BrokerPreset): SDKOption => ({
     id: p.id,
@@ -235,6 +244,9 @@ function CreateWizard({ presets, existingUTAIds, onSave, onClose }: {
     badgeColor: p.badgeColor,
   })
 
+  // 'testing' category presets (Simulator) are intentionally excluded — their
+  // creation entry lives in Dev → Simulator so users picking a real broker
+  // here don't see "Simulator" alongside Bybit / Alpaca / IBKR.
   const recommendedOptions: SDKOption[] = useMemo(
     () => presets.filter(p => p.category === 'recommended').map(toOption),
     [presets],
@@ -244,10 +256,10 @@ function CreateWizard({ presets, existingUTAIds, onSave, onClose }: {
     [presets],
   )
 
-  const buildUTA = (): UTAConfig | null => {
+  const buildUTA = (): Omit<UTAConfig, 'id'> | null => {
     if (!preset) return null
     return {
-      id: finalId,
+      label: finalName,
       presetId: preset.id,
       enabled: true,
       guards: [],
@@ -264,10 +276,7 @@ function CreateWizard({ presets, existingUTAIds, onSave, onClose }: {
   const handleTest = async () => {
     if (!preset) return
     setError('')
-    if (existingUTAIds.includes(finalId)) {
-      setError(`UTA "${finalId}" already exists`)
-      return
-    }
+    setConflict(null)
     const validationError = validate()
     if (validationError) {
       setError(validationError)
@@ -291,10 +300,20 @@ function CreateWizard({ presets, existingUTAIds, onSave, onClose }: {
   const handleSave = async () => {
     const uta = buildUTA()
     if (!uta) return
-    setSaving(true); setError('')
+    setSaving(true); setError(''); setConflict(null)
     try {
       await onSave(uta)
     } catch (err) {
+      // Surface 409 collision info (typed as BrokerAlreadyExistsError) so
+      // the user can jump to the existing UTA instead of forking.
+      if (err instanceof Error && err.name === 'BrokerAlreadyExistsError') {
+        const existing = (err as Error & { existing?: BrokerConflict['existing'] }).existing
+        if (existing) {
+          setConflict({ existing })
+          setSaving(false)
+          return
+        }
+      }
       setError(err instanceof Error ? err.message : 'Failed to save UTA')
       setSaving(false)
     }
@@ -341,8 +360,8 @@ function CreateWizard({ presets, existingUTAIds, onSave, onClose }: {
           <div className="space-y-5">
             {preset.hint && <HintBlock text={preset.hint} />}
             <div className="space-y-3">
-              <Field label="UTA ID">
-                <input className={inputClass} value={id} onChange={(e) => setId(e.target.value.trim())} placeholder={defaultId} />
+              <Field label="Name" description="Display label for this account. The unique id is derived automatically from the credentials below.">
+                <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder={defaultName} />
               </Field>
               <SchemaFormFields
                 fields={fields}
@@ -363,8 +382,12 @@ function CreateWizard({ presets, existingUTAIds, onSave, onClose }: {
           </div>
         )}
 
-        {step === 'test' && testResult && (
-          <TestResultPanel result={testResult} utaId={finalId} />
+        {step === 'test' && testResult && !conflict && (
+          <TestResultPanel result={testResult} utaId={finalName} />
+        )}
+
+        {step === 'test' && conflict && (
+          <BrokerConflictPanel existing={conflict.existing} onOpenExisting={() => onOpenExisting(conflict.existing.id)} />
         )}
       </div>
 
@@ -386,7 +409,11 @@ function CreateWizard({ presets, existingUTAIds, onSave, onClose }: {
         {step === 'test' && (
           <>
             <button onClick={() => setStep('config')} className="btn-secondary">← Back</button>
-            {testResult?.success ? (
+            {conflict ? (
+              <button onClick={() => onOpenExisting(conflict.existing.id)} className="btn-primary">
+                Open existing
+              </button>
+            ) : testResult?.success ? (
               <button onClick={handleSave} disabled={saving} className="btn-primary">
                 {saving ? 'Saving...' : 'Save UTA'}
               </button>
@@ -414,6 +441,34 @@ function StepDots({ current }: { current: WizardStep }) {
           }`}
         />
       ))}
+    </div>
+  )
+}
+
+function BrokerConflictPanel({ existing, onOpenExisting }: {
+  existing: { id: string; label: string; presetId: string }
+  onOpenExisting: () => void
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <span className="w-2 h-2 rounded-full bg-yellow-400 shrink-0" />
+        <span className="text-[13px] font-medium text-text">Broker already configured</span>
+      </div>
+      <div className="rounded-md border border-yellow-400/30 bg-yellow-400/5 px-3 py-2.5">
+        <p className="text-[12px] text-text leading-relaxed">
+          Another UTA already exists for this broker (same identity-defining credentials).
+          Re-using the same key from a separate account would double-count its positions in
+          aggregate views.
+        </p>
+        <p className="text-[12px] text-text-muted leading-relaxed mt-2">
+          Existing: <strong className="text-text">{existing.label}</strong> <span className="font-mono text-text-muted/70">({existing.id})</span>
+        </p>
+      </div>
+      <p className="text-[11px] text-text-muted">
+        Click <strong className="text-text">Open existing</strong> to use it, or <strong className="text-text">← Back</strong> to point this UTA at a different account.
+      </p>
+      <button onClick={onOpenExisting} className="btn-secondary w-full">Open existing UTA</button>
     </div>
   )
 }

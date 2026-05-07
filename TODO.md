@@ -26,6 +26,15 @@ the item when done — git log is the history.
       entirely on localhost binding. Needs a proper auth story (shared
       admin token? session cookies? per-route scopes?) before any of it
       is exposed beyond a single-user local machine.
+- [ ] Retire `PUT /api/trading/config/uta/:id` once all on-disk UTAs
+      have derived ids. The route still accepts a full `UTAConfig` body
+      including credentials (we unmask masked values from the existing
+      record before re-saving) — that's a credential-handling surface
+      we'd rather not keep around long-term. Replacement: a narrower
+      `PATCH /uta/:id` that only allows label / guards / enabled
+      changes; credential rotation goes via DELETE + new POST. Wait
+      until the user-typed-id legacy UTAs have all migrated naturally
+      so we don't break edits on existing accounts.
 - [ ] Webhook tokens: add admin UI for listing / adding / rotating
       tokens inside the Webhook tab instead of requiring hand-editing
       `data/config/webhook.json`. Config surface exists; just missing
@@ -36,6 +45,18 @@ the item when done — git log is the history.
 
 ## Architecture
 
+- [ ] Extract `derivePositionMath(raw): { marketValue, unrealizedPnL }`
+      shared util. Today's IBroker contract requires every broker's
+      `getPositions` to multiply by `multiplier` when computing
+      marketValue / unrealizedPnL — but it's documentation-only, no
+      enforcement. Production brokers happen to dodge it because their
+      primary markets all have multiplier=1 (CCXT spot/perp) or the
+      upstream API hands back pre-multiplied values (Alpaca, IBKR).
+      First broker to grow custom OPT/FUT math will repeat Mock's
+      bug shape (cash-flow / marketValue / PnL all need multiplier).
+      Replace per-broker computation with one shared derive call;
+      brokers emit raw fields (qty, markPrice, multiplier, side,
+      avgCost) and downstream math is contract-uniform.
 - [ ] Unified config hot-reload. Right now every consumer of a config
       section has to solve "did the user edit this?" on its own —
       Telegram/MCP-Ask via `reconnectConnectors`, opentypebb via lazy

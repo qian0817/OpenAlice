@@ -6,6 +6,7 @@ import {
 } from '../../core/config.js'
 import { createBroker } from '../../domain/trading/brokers/factory.js'
 import { BUILTIN_BROKER_PRESETS } from '../../domain/trading/brokers/presets.js'
+import { deriveUtaId, getBrokerPreset, mintInstanceId } from '../../domain/trading/brokers/preset-catalog.js'
 
 // ==================== Credential helpers ====================
 
@@ -71,6 +72,76 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
 
   // ==================== UTA CRUD ====================
 
+  /**
+   * POST /uta — create a new UTA. Client supplies presetId + presetConfig
+   * (+ optional label/guards). The id is derived from the preset's
+   * fingerprintFields (deterministic broker identity) and assigned by
+   * the server. Mock presets get a freshly-minted `_instanceId` if the
+   * client didn't include one. 409 if an existing UTA already derives
+   * to the same id (so re-adding the same broker doesn't silently fork).
+   */
+  app.post('/uta', async (c) => {
+    try {
+      const body = await c.req.json() as Record<string, unknown>
+      if (!body.presetId || typeof body.presetId !== 'string') {
+        return c.json({ error: 'presetId is required' }, 400)
+      }
+
+      let preset
+      try {
+        preset = getBrokerPreset(body.presetId)
+      } catch (err) {
+        return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+      }
+
+      // Mint _instanceId for Mock presets so each sim has a unique fingerprint.
+      const presetConfig = { ...(body.presetConfig as Record<string, unknown> | undefined ?? {}) }
+      if (preset.engine === 'mock' && !presetConfig._instanceId) {
+        presetConfig._instanceId = mintInstanceId()
+      }
+
+      const id = deriveUtaId(preset, presetConfig)
+      const accounts = await readUTAsConfig()
+      const existing = accounts.find((a) => a.id === id)
+      if (existing) {
+        return c.json({
+          error: 'A UTA already exists for this broker identity',
+          existing: {
+            id: existing.id,
+            label: existing.label ?? existing.id,
+            presetId: existing.presetId,
+          },
+        }, 409)
+      }
+
+      const candidate = {
+        id,
+        label: typeof body.label === 'string' && body.label ? body.label : id,
+        presetId: preset.id,
+        enabled: body.enabled !== false,
+        guards: Array.isArray(body.guards) ? body.guards : [],
+        presetConfig,
+      }
+      const validated = utaConfigSchema.parse(candidate)
+      accounts.push(validated)
+      await writeUTAsConfig(accounts)
+
+      ctx.utaManager.reconnectUTA(id).catch(() => {})
+      return c.json(validated, 201)
+    } catch (err) {
+      if (err instanceof Error && err.name === 'ZodError') {
+        return c.json({ error: 'Validation failed', details: JSON.parse(err.message) }, 400)
+      }
+      return c.json({ error: String(err) }, 500)
+    }
+  })
+
+  /**
+   * PUT /uta/:id — edit an existing UTA. Will NOT create a new one; new
+   * UTAs go through POST /uta which derives the id from credentials.
+   * Edits keep the original id even when credentials change (rotation
+   * is a normal user action; id is set at origin and immutable).
+   */
   app.put('/uta/:id', async (c) => {
     try {
       const id = c.req.param('id')
@@ -79,31 +150,32 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
         return c.json({ error: 'Body id must match URL id' }, 400)
       }
 
-      // Restore masked credentials from existing config
       const accounts = await readUTAsConfig()
       const existing = accounts.find((a) => a.id === id)
-      if (existing) {
-        unmaskSecrets(body, existing as unknown as Record<string, unknown>)
+      if (!existing) {
+        return c.json({
+          error: `UTA "${id}" not found. Use POST /uta to create a new account.`,
+        }, 422)
       }
+
+      // Restore masked credentials from existing config
+      unmaskSecrets(body, existing as unknown as Record<string, unknown>)
 
       const validated = utaConfigSchema.parse(body)
-
       const idx = accounts.findIndex((a) => a.id === id)
-      if (idx >= 0) {
-        accounts[idx] = validated
-      } else {
-        accounts.push(validated)
-      }
+      accounts[idx] = validated
       await writeUTAsConfig(accounts)
 
       // Handle enabled state changes at runtime
-      const wasEnabled = existing?.enabled !== false
+      const wasEnabled = existing.enabled !== false
       const nowEnabled = validated.enabled !== false
       if (wasEnabled && !nowEnabled) {
-        // Disabled — close running account
         await ctx.utaManager.removeUTA(id)
       } else if (!wasEnabled && nowEnabled) {
-        // Enabled — start account
+        ctx.utaManager.reconnectUTA(id).catch(() => {})
+      } else if (wasEnabled && nowEnabled) {
+        // Same enabled state but credentials may have changed (rotation) —
+        // bounce the account so the new credentials take effect.
         ctx.utaManager.reconnectUTA(id).catch(() => {})
       }
 

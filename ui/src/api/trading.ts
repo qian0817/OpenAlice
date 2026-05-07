@@ -149,6 +149,35 @@ export const tradingApi = {
     return fetchJson('/api/trading/config')
   },
 
+  /**
+   * Create a new UTA. The server derives the id from the preset's
+   * fingerprintFields applied to presetConfig — the client doesn't pick
+   * one. Returns 409 (BrokerAlreadyExistsError) if another UTA already
+   * derives to the same id.
+   */
+  async createUTA(uta: Omit<UTAConfig, 'id'>): Promise<UTAConfig> {
+    const res = await fetch('/api/trading/config/uta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(uta),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (res.status === 409) {
+      const err = new Error(body.error ?? 'A UTA already exists for this broker identity') as Error & { existing?: { id: string; label: string; presetId: string } }
+      err.name = 'BrokerAlreadyExistsError'
+      err.existing = body.existing
+      throw err
+    }
+    if (!res.ok) {
+      throw new Error(body.error || `Failed to create UTA (${res.status})`)
+    }
+    return body
+  },
+
+  /**
+   * Edit an existing UTA. Cannot create — the id must already be on disk
+   * (PUT returns 422 for unknown ids; use `createUTA` for new accounts).
+   */
   async upsertUTA(uta: UTAConfig): Promise<UTAConfig> {
     const res = await fetch(`/api/trading/config/uta/${uta.id}`, {
       method: 'PUT',
@@ -211,7 +240,12 @@ export const tradingApi = {
 
   // ==================== Connection Testing ====================
 
-  async testConnection(uta: UTAConfig): Promise<TestConnectionResult> {
+  /**
+   * Test broker credentials before committing them. Accepts either a full
+   * UTAConfig (during edit) or a draft without an id (during create) — the
+   * server stamps `__test__` if id is absent.
+   */
+  async testConnection(uta: UTAConfig | Omit<UTAConfig, 'id'>): Promise<TestConnectionResult> {
     const res = await fetch('/api/trading/config/test-connection', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

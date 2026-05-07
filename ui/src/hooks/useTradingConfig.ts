@@ -7,6 +7,9 @@ export interface UseTradingConfigResult {
   loading: boolean
   error: string | null
 
+  /** Create a new UTA — server derives id from preset + presetConfig. */
+  createUTA: (a: Omit<UTAConfig, 'id'>) => Promise<UTAConfig>
+  /** Edit an existing UTA. Will fail with 422 if the id doesn't exist. */
   saveUTA: (a: UTAConfig) => Promise<void>
   deleteUTA: (id: string) => Promise<void>
   reconnectUTA: (id: string) => Promise<ReconnectResult>
@@ -33,6 +36,12 @@ export function useTradingConfig(): UseTradingConfigResult {
 
   useEffect(() => { load() }, [load])
 
+  const createUTA = useCallback(async (a: Omit<UTAConfig, 'id'>): Promise<UTAConfig> => {
+    const created = await api.trading.createUTA(a)
+    setUTAs((prev) => [...prev, created])
+    return created
+  }, [])
+
   const saveUTA = useCallback(async (a: UTAConfig) => {
     await api.trading.upsertUTA(a)
     setUTAs((prev) => {
@@ -57,7 +66,7 @@ export function useTradingConfig(): UseTradingConfigResult {
 
   return {
     utas, loading, error,
-    saveUTA, deleteUTA,
+    createUTA, saveUTA, deleteUTA,
     reconnectUTA, refresh: load,
   }
 }

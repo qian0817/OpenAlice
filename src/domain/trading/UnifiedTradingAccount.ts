@@ -558,7 +558,11 @@ export class UnifiedTradingAccount {
       if (!final) continue  // Should be unreachable — reconcile would seed it.
 
       p.avgCost = final.avgCost.toString()
-      const pnl = p.quantity.mul(new Decimal(p.marketPrice).minus(final.avgCost))
+      // Per IBroker.Position contract, unrealizedPnL is multiplier-applied;
+      // cost-basis WAC operates on per-unit prices, so the multiplier has
+      // to be reapplied here. Defaults to 1 for stocks / crypto.
+      const multiplier = p.multiplier && p.multiplier !== '' ? new Decimal(p.multiplier) : new Decimal(1)
+      const pnl = p.quantity.mul(new Decimal(p.marketPrice).minus(final.avgCost)).mul(multiplier)
       p.unrealizedPnL = pnl.toString()
     }
   }

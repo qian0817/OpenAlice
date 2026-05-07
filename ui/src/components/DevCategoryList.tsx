@@ -15,6 +15,7 @@ const CATEGORIES: CategoryItem[] = [
   { label: 'Sessions', tab: 'sessions' },
   { label: 'Snapshots', tab: 'snapshots' },
   { label: 'Logs', tab: 'logs' },
+  { label: 'Simulator', tab: 'simulator' },
 ]
 
 /**
