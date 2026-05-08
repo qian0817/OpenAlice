@@ -220,3 +220,69 @@ work meaningfully shifts the PR's framing>
 
 This keeps the PR description as a faithful audit trail across sessions,
 and lets reviewers see who-did-what without trawling the commit log alone.
+
+### Default vs. isolated branch — when to deviate from `dev`
+
+The default for any session is **work on `dev`** and let the rolling
+PR carry it to master. The exception is **invasive, long-running work
+that shouldn't share a branch with parallel sessions** — typically a
+refactor of shared types / cross-cutting infrastructure that, while
+in-flight, would force every other session to rebase against churn
+they don't have context for.
+
+Examples worth isolating: changing a base interface every broker
+implements; renaming or restructuring a module everyone imports from;
+multi-day schema migrations.
+Examples that stay on `dev`: any feature, any local fix, anything
+scoped to one subsystem.
+
+When isolation is the right call:
+
+```bash
+# Branch from master (clean baseline, dev's churn won't bleed in)
+git fetch origin
+git checkout master
+git pull origin master
+git checkout -b refactor/<short-name>
+
+# During the refactor, periodically rebase against master so the
+# eventual merge stays small. Skip dev — its session-by-session
+# churn is intentionally not part of the baseline you're testing
+# against.
+git fetch origin
+git rebase origin/master
+
+# When done, PR straight to master (NOT dev). The refactor is its own
+# coherent unit, reviewed end-to-end.
+git push -u origin refactor/<short-name>
+gh pr create --base master --head refactor/<short-name> ...
+```
+
+**After the refactor merges**, dev needs to absorb the new master so
+in-flight sessions land on the new baseline:
+
+```bash
+git checkout dev
+git pull origin dev
+git fetch origin
+git merge origin/master
+git push origin dev
+```
+
+In-flight rolling-PR work then sees the refactor in their next pull
+and rebases naturally. Their diffs against the refreshed `dev` may
+need real fix-ups (that's the cost of an invasive refactor — and
+the reason you isolated it in the first place).
+
+**Decision rule for the next session that starts work:** if `master`
+is currently ahead of `dev` (because a refactor branch just landed
+there), do `git checkout dev && git merge origin/master` *before*
+starting any new feature work. Otherwise your new commits will land
+on a stale baseline.
+
+**Parallel work happens in the cloud, not in local worktrees.** For a
+project this size, spinning up multiple local worktrees costs more
+in `pnpm install` / `data/` copying / port juggling than it saves.
+Hand parallel tracks off to cloud Claude sessions instead — each
+gets its own sandbox, returns a PR, and doesn't touch the local
+working tree.

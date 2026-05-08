@@ -659,14 +659,17 @@ export class MockBroker implements IBroker {
     if (qty.lte(0)) throw new Error('externalTrade: quantity must be positive')
 
     const existing = this._positions.get(params.nativeKey)
-    if (!existing && params.side === 'SELL') {
-      throw new Error(`MockBroker[${this.id}]: cannot externalTrade SELL — no position at ${params.nativeKey}`)
-    }
 
     if (!existing) {
+      // No existing position → opening. BUY opens long, SELL opens short.
+      // externalTrade models the user manually trading on the exchange app,
+      // where opening a short (covered call's call leg, naked put, perp
+      // short, etc.) is a legitimate action — distinct from placeOrder /
+      // _applyFill, which still rejects SELL-without-position because Alice
+      // shouldn't silently flip a SELL intent into a short open.
       this._positions.set(params.nativeKey, {
         contract: this._buildContract(params.nativeKey, params.contract),
-        side: 'long',
+        side: params.side === 'BUY' ? 'long' : 'short',
         quantity: qty,
         avgCost: price,
         avgCostSource: 'wallet',

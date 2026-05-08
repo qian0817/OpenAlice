@@ -78,6 +78,22 @@ the item when done — git log is the history.
 
 ## Bugs
 
+- [ ] IBKR `getNativeKey` may use the wrong field for nativeKey. Surfaced
+      2026-05-07 during the Phase-3 revert (`afddd41`) when articulating
+      the per-broker uniqueness scheme. IBKR's `Contract.symbol` and
+      `Contract.localSymbol` aren't reliably unique — one symbol "AAPL"
+      matches the underlying stock + every option chain expiry + every
+      weekly + every LEAP. The actual primary key is `conId` (numeric).
+      If `IbkrBroker.getNativeKey` currently returns `localSymbol ||
+      symbol`, it works only by accident — the moment users hold the
+      same underlying across multiple expiries, aliceId starts colliding.
+      Audit `src/domain/trading/brokers/ibkr/IbkrBroker.ts` (look for
+      `getNativeKey`); change to `String(contract.conId)` if not already.
+      Also extend the same audit to Alpaca / LeverUp / Bybit-direct
+      brokers — each should have an explicit getNativeKey returning the
+      broker's documented primary key, not a lazy `localSymbol ||
+      symbol` fallback.
+
 - [ ] Snapshot / FX: after currency conversion, snapshot values
       occasionally come out as wildly wrong numbers (reported, cause
       unknown). Likely a direction mistake (multiply vs divide) or
