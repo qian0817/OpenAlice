@@ -50,14 +50,14 @@ describe('CcxtBroker — Bybit e2e', () => {
 
     const results = await b().searchContracts('ETH')
     expect(results.length).toBeGreaterThan(0)
-    const perp = results.find(r => r.contract.localSymbol?.includes('USDT:USDT'))
+    const perp = results.find(r => r.contract.secType === 'CRYPTO_PERP')
     expect(perp).toBeDefined()
     console.log(`  found ${results.length} ETH contracts, perp: ${perp!.contract.localSymbol}`)
   })
 
   it('places market buy 0.01 ETH → execution returned', async ({ skip }) => {
     const matches = await b().searchContracts('ETH')
-    const ethPerp = matches.find(m => m.contract.localSymbol?.includes('USDT:USDT'))
+    const ethPerp = matches.find(m => m.contract.secType === 'CRYPTO_PERP')
     if (!ethPerp) return skip('ETH/USDT perp not found')
 
     // Diagnostic: see raw CCXT createOrder response
@@ -100,7 +100,7 @@ describe('CcxtBroker — Bybit e2e', () => {
 
   it('closes ETH position with reduceOnly', async ({ skip }) => {
     const matches = await b().searchContracts('ETH')
-    const ethPerp = matches.find(m => m.contract.localSymbol?.includes('USDT:USDT'))
+    const ethPerp = matches.find(m => m.contract.secType === 'CRYPTO_PERP')
     if (!ethPerp) return skip('ETH/USDT perp not found')
 
     const result = await b().closePosition(ethPerp.contract, new Decimal('0.01'))
@@ -111,7 +111,7 @@ describe('CcxtBroker — Bybit e2e', () => {
   it('queries order by ID', async ({ skip }) => {
     // Place a small order to get an orderId
     const matches = await b().searchContracts('ETH')
-    const ethPerp = matches.find(m => m.contract.localSymbol?.includes('USDT:USDT'))
+    const ethPerp = matches.find(m => m.contract.secType === 'CRYPTO_PERP')
     if (!ethPerp) return skip('ETH/USDT perp not found')
 
     const order = new Order()
@@ -139,7 +139,7 @@ describe('CcxtBroker — Bybit e2e', () => {
 
   it('places order with TPSL and reads back tpsl from getOrder', async ({ skip }) => {
     const matches = await b().searchContracts('ETH')
-    const ethPerp = matches.find(m => m.contract.localSymbol?.includes('USDT:USDT'))
+    const ethPerp = matches.find(m => m.contract.secType === 'CRYPTO_PERP')
     if (!ethPerp) return skip('ETH/USDT perp not found')
 
     const order = new Order()
@@ -149,8 +149,8 @@ describe('CcxtBroker — Bybit e2e', () => {
 
     // Get current price to set reasonable TP/SL
     const quote = await b().getQuote(ethPerp.contract)
-    const tpPrice = Math.round(quote.last * 1.5)  // 50% above — won't trigger
-    const slPrice = Math.round(quote.last * 0.5)  // 50% below — won't trigger
+    const tpPrice = Math.round(Number(quote.last) * 1.5)  // 50% above — won't trigger
+    const slPrice = Math.round(Number(quote.last) * 0.5)  // 50% below — won't trigger
 
     const placed = await b().placeOrder(ethPerp.contract, order, {
       takeProfit: { price: String(tpPrice) },
@@ -187,7 +187,7 @@ describe('CcxtBroker — Bybit e2e', () => {
     // Place a stop-loss trigger order far from market price, then verify getOrder can see it.
     // This is the core scenario from issue #90.
     const matches = await b().searchContracts('ETH')
-    const ethPerp = matches.find(m => m.contract.localSymbol?.includes('USDT:USDT'))
+    const ethPerp = matches.find(m => m.contract.secType === 'CRYPTO_PERP')
     if (!ethPerp) return skip('ETH/USDT perp not found')
 
     // Open a small position first — stop-loss with reduceOnly needs an existing position
@@ -200,7 +200,7 @@ describe('CcxtBroker — Bybit e2e', () => {
 
     // Get current price to set a trigger far away (won't execute)
     const quote = await b().getQuote(ethPerp.contract)
-    const triggerPrice = Math.round(quote.last * 0.5) // 50% below — will never trigger
+    const triggerPrice = Math.round(Number(quote.last) * 0.5) // 50% below — will never trigger
 
     // Place a conditional sell order via raw CCXT (with triggerPrice).
     // Bybit requires triggerDirection: price falling below trigger = "descending".

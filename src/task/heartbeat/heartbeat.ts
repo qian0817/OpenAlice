@@ -174,27 +174,32 @@ export function createHeartbeat(opts: HeartbeatOpts): Heartbeat {
         return
       }
 
-      // 5. Send notification
-      let delivered = false
+      // 5. Append to notifications store. Connectors (Web bell, Telegram
+      //    inline, …) subscribe to the store's onAppended event and
+      //    surface the notification however suits their transport.
+      let appended = false
       try {
-        const result2 = await connectorCenter.notify(text, {
+        await connectorCenter.notify(text, {
           media: result.media,
           source: 'heartbeat',
         })
-        delivered = result2.delivered
-        if (delivered) dedup.record(text, now())
+        appended = true
+        // Record dedup unconditionally on append: the notification exists
+        // in the canonical record, even if a particular connector chose
+        // not to surface it (e.g. Telegram skipping when user is inactive).
+        dedup.record(text, now())
       } catch (sendErr) {
-        console.warn('heartbeat: send failed:', sendErr)
+        console.warn('heartbeat: notify failed:', sendErr)
       }
 
-      console.log(`heartbeat: CHAT_YES — delivered=${delivered} (${durationMs}ms)`)
+      console.log(`heartbeat: CHAT_YES — appended=${appended} (${durationMs}ms)`)
 
       // 6. Done event
       await ctx.emit('heartbeat.done', {
         reply: text,
         reason: parsed.reason,
         durationMs,
-        delivered,
+        delivered: appended,
       })
     } catch (err) {
       console.error('heartbeat: error:', err)

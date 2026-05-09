@@ -12,6 +12,8 @@
 import { Contract, OrderState } from '@traderalice/ibkr'
 import '../../contract-ext.js'
 import type { CcxtMarket } from './ccxt-types.js'
+import { buildContract } from '../contract-builder.js'
+import type { SecType } from '../../contract-discipline.js'
 
 // ---- Symbol encoding for aliceId ----
 
@@ -30,7 +32,7 @@ export function decodeSymbol(encoded: string): string {
 export function ccxtTypeToSecType(type: string): string {
   switch (type) {
     case 'spot': return 'CRYPTO'
-    case 'swap': return 'CRYPTO'  // perpetual swap is still crypto
+    case 'swap': return 'CRYPTO_PERP'
     case 'future': return 'FUT'
     case 'option': return 'OPT'
     default: return 'CRYPTO'
@@ -60,17 +62,58 @@ export function makeOrderState(ccxtStatus: string | undefined): OrderState {
 
 /**
  * Convert a CcxtMarket to an IBKR Contract.
- * aliceId = "{exchangeName}-{encodeSymbol(market.symbol)}"
+ *
+ * `Contract.localSymbol` is set to `market.symbol` — CCXT's unified wire
+ * format (`BTC/USDT:USDT`, `BTC/USDT`, `BTC/USDT:USDT-220929`). That's
+ * CCXT's own uniqueness primitive: it encodes base + quote + (optional)
+ * settle + (optional) expiry in one string, distinguishing every product
+ * the exchange offers. We do not normalize this across brokers —
+ * `aliceId`'s `{utaId}|` prefix already scopes per-broker, and each
+ * broker's `getNativeKey` reads its own native key out of Contract.
+ *
+ * For FUT/OPT/FOP markets, derives `lastTradeDateOrContractMonth` from
+ * `market.expiry` (CCXT exposes it as ms epoch on dated derivatives) and
+ * `multiplier` from `market.contractSize`. CCXT-typed `optionType` and
+ * `strike` populate the OPT-specific fields. `assertContract` (called
+ * inside `buildContract`) verifies all required taxonomy fields are
+ * present — malformed market data throws here so callers can decide
+ * whether to skip or surface the error.
  */
 export function marketToContract(market: CcxtMarket, exchangeName: string): Contract {
-  const c = new Contract()
-  c.symbol = market.base
-  c.secType = ccxtTypeToSecType(market.type)
-  c.exchange = exchangeName
-  c.currency = market.quote
-  c.localSymbol = market.symbol       // CCXT unified symbol, e.g. "BTC/USDT:USDT"
-  c.description = `${market.base}/${market.quote} ${market.type}${market.settle ? ` (${market.settle} settled)` : ''}`
-  return c
+  const secType = ccxtTypeToSecType(market.type) as SecType
+  // CcxtMarket only types the universal subset; CCXT actually exposes
+  // expiry / contractSize / strike / optionType on derivative markets.
+  const m = market as unknown as {
+    expiry?: number
+    contractSize?: number
+    strike?: number
+    optionType?: 'call' | 'put'
+  }
+
+  const params: Parameters<typeof buildContract>[0] = {
+    symbol: market.base,
+    secType,
+    exchange: exchangeName,
+    currency: market.quote,
+    localSymbol: market.symbol,
+    description: `${market.base}/${market.quote} ${market.type}${market.settle ? ` (${market.settle} settled)` : ''}`,
+  }
+
+  if (secType === 'FUT' || secType === 'OPT' || secType === 'FOP') {
+    if (m.expiry) {
+      const d = new Date(m.expiry)
+      params.lastTradeDateOrContractMonth =
+        `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`
+    }
+    params.multiplier = m.contractSize != null ? String(m.contractSize) : '1'
+  }
+  if (secType === 'OPT' || secType === 'FOP') {
+    if (m.strike != null) params.strike = m.strike
+    if (m.optionType === 'call') params.right = 'C'
+    else if (m.optionType === 'put') params.right = 'P'
+  }
+
+  return buildContract(params)
 }
 
 /** Parse aliceId → CCXT unified symbol. */
@@ -125,6 +168,10 @@ export function resolveContractSync(
 
   for (const market of Object.values(markets)) {
     if (market.active === false) continue
+    // Some exchange-supplied market entries are skeletal (delisted /
+    // synthetic / index-only) and lack base or quote — skip those rather
+    // than crash on .toUpperCase().
+    if (!market.base || !market.quote) continue
     if (market.base.toUpperCase() !== searchBase) continue
 
     if (query.secType) {

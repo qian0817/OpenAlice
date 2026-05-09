@@ -77,6 +77,30 @@ export interface Position {
   marketValue: string
   unrealizedPnL: string
   realizedPnL: string
+  /**
+   * Shares-per-contract: how many underlying units one `quantity` unit
+   * represents. `'1'` for plain stocks/crypto/forex; `'100'` for US
+   * equity options; broker-specific for futures (e.g. ES = '50');
+   * issuer-specific for HK warrants/CBBCs (often a non-integer).
+   *
+   * `marketValue` and `unrealizedPnL` are derived via `derivePositionMath`
+   * with this field folded in, so consumers must NOT re-apply. This was
+   * optional before the IBKR-as-truth refactor; it's required now to
+   * force every broker to declare a value rather than rely on an implicit
+   * 1-default. Read-time normalization in TradingGit.rehydrateGitState
+   * fills missing values from older commit.json files.
+   */
+  multiplier: string
+  /**
+   * Provenance of `avgCost`:
+   * - `'broker'`: broker reported it directly (Alpaca avg_entry_price,
+   *   IBKR EWrapper, CCXT derivative entryPrice). Authoritative.
+   * - `'wallet'`: broker has no real cost basis (e.g. CCXT spot synthesized
+   *   from fetchBalance) — UTA must reconstruct from Alice's git log,
+   *   bootstrapping unknown qty via reconcileBalance at observed markPrice.
+   * Undefined defaults to `'broker'` (current behavior, back-compat).
+   */
+  avgCostSource?: 'broker' | 'wallet'
 }
 
 // ==================== Order result ====================
@@ -96,8 +120,13 @@ export interface OpenOrder {
   contract: Contract
   order: Order
   orderState: OrderState
-  /** Average fill price — from orderStatus callback or broker-specific source. */
-  avgFillPrice?: number
+  /**
+   * Average fill price — from orderStatus callback or broker-specific
+   * source. String to preserve Decimal precision end-to-end (sub-tick
+   * fills + sub-satoshi accounting in OKX/Bybit unified accounts can
+   * lose information through float).
+   */
+  avgFillPrice?: string
   /** Attached take-profit / stop-loss (CCXT: from order fields; Alpaca: from bracket legs). */
   tpsl?: TpSlParams
 }
@@ -120,14 +149,20 @@ export interface AccountInfo {
 
 // ==================== Market data ====================
 
+/**
+ * Real-time tick data from the broker. Monetary fields are strings —
+ * trading-side numerics stay in Decimal-as-string end-to-end.
+ * (Distinct from `domain/market-data` Quote types, which serve the
+ * read-only analysis surface and stay number-typed there.)
+ */
 export interface Quote {
   contract: Contract
-  last: number
-  bid: number
-  ask: number
-  volume: number
-  high?: number
-  low?: number
+  last: string
+  bid: string
+  ask: string
+  volume: string
+  high?: string
+  low?: string
   timestamp: Date
 }
 
@@ -203,6 +238,17 @@ export interface IBroker<TMeta = unknown> {
 
   searchContracts(pattern: string): Promise<ContractDescription[]>
   getContractDetails(query: Contract): Promise<ContractDetails | null>
+
+  /**
+   * Refresh the broker's local catalog cache from upstream.
+   * Optional — only EnumeratingCatalog brokers (Alpaca / CCXT / Mock)
+   * implement this. SearchingCatalog brokers (IBKR via reqMatchingSymbols)
+   * leave it undefined; the cron loop in main.ts skips them via `?.`.
+   *
+   * Implementations should keep the prior cache on failure and let the
+   * exception propagate so the caller can log.
+   */
+  refreshCatalog?(): Promise<void>
 
   // ---- Trading operations (IBKR Order as source of truth) ----
 

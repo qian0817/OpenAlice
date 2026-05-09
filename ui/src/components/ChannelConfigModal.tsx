@@ -5,16 +5,19 @@ import type { ChannelListItem } from '../api/channels'
 import type { ToolInfo } from '../api/tools'
 
 interface ChannelConfigModalProps {
-  channel: ChannelListItem
+  /** Existing channel for edit mode. Undefined → create mode. */
+  channel?: ChannelListItem
   onClose: () => void
-  onSaved: (updated: ChannelListItem) => void
+  onSaved: (channel: ChannelListItem) => void
 }
 
 export function ChannelConfigModal({ channel, onClose, onSaved }: ChannelConfigModalProps) {
-  const [label, setLabel] = useState(channel.label)
-  const [systemPrompt, setSystemPrompt] = useState(channel.systemPrompt ?? '')
-  const [profile, setProfile] = useState(channel.profile ?? '')
-  const [disabledTools, setDisabledTools] = useState<Set<string>>(new Set(channel.disabledTools ?? []))
+  const isCreate = !channel
+
+  const [label, setLabel] = useState(channel?.label ?? '')
+  const [systemPrompt, setSystemPrompt] = useState(channel?.systemPrompt ?? '')
+  const [profile, setProfile] = useState(channel?.profile ?? '')
+  const [disabledTools, setDisabledTools] = useState<Set<string>>(new Set(channel?.disabledTools ?? []))
   const [tools, setTools] = useState<ToolInfo[]>([])
   const [profiles, setProfiles] = useState<Record<string, Profile>>({})
   const [saving, setSaving] = useState(false)
@@ -26,16 +29,30 @@ export function ChannelConfigModal({ channel, onClose, onSaved }: ChannelConfigM
   }, [])
 
   const handleSave = async () => {
-    setSaving(true)
     setError('')
+    if (isCreate && !label.trim()) {
+      setError('Name is required')
+      return
+    }
+    setSaving(true)
     try {
-      const { channel: updated } = await api.channels.update(channel.id, {
-        label: label.trim() || channel.label,
-        systemPrompt: systemPrompt.trim() || undefined,
-        profile: profile || undefined,
-        disabledTools: disabledTools.size > 0 ? [...disabledTools] : undefined,
-      })
-      onSaved(updated)
+      if (isCreate) {
+        const { channel: created } = await api.channels.create({
+          label: label.trim(),
+          ...(systemPrompt.trim() ? { systemPrompt: systemPrompt.trim() } : {}),
+          ...(profile ? { profile } : {}),
+          ...(disabledTools.size > 0 ? { disabledTools: [...disabledTools] } : {}),
+        })
+        onSaved(created)
+      } else {
+        const { channel: updated } = await api.channels.update(channel!.id, {
+          label: label.trim() || channel!.label,
+          systemPrompt: systemPrompt.trim() || undefined,
+          profile: profile || undefined,
+          disabledTools: disabledTools.size > 0 ? [...disabledTools] : undefined,
+        })
+        onSaved(updated)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
     } finally {
@@ -62,7 +79,9 @@ export function ChannelConfigModal({ channel, onClose, onSaved }: ChannelConfigM
       >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-border">
-          <h2 className="text-[15px] font-semibold text-text">Configure Channel</h2>
+          <h2 className="text-[15px] font-semibold text-text">
+            {isCreate ? 'New Channel' : 'Configure Channel'}
+          </h2>
           <button onClick={onClose} className="text-text-muted hover:text-text transition-colors">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
           </button>
@@ -70,13 +89,15 @@ export function ChannelConfigModal({ channel, onClose, onSaved }: ChannelConfigM
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* Label */}
+          {/* Name */}
           <div>
             <label className="block text-xs font-medium text-text-muted mb-1">Channel Name</label>
             <input
               value={label}
               onChange={(e) => setLabel(e.target.value)}
+              placeholder={isCreate ? 'e.g. Strategy Research' : undefined}
               className={inputClass}
+              autoFocus={isCreate}
             />
           </div>
 
@@ -146,7 +167,7 @@ export function ChannelConfigModal({ channel, onClose, onSaved }: ChannelConfigM
           <div className="flex gap-2 ml-auto">
             <button onClick={onClose} className="btn-secondary">Cancel</button>
             <button onClick={handleSave} disabled={saving} className="btn-primary">
-              {saving ? 'Saving...' : 'Save'}
+              {saving ? (isCreate ? 'Creating...' : 'Saving...') : (isCreate ? 'Create' : 'Save')}
             </button>
           </div>
         </div>

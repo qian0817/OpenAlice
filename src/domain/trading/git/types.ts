@@ -25,6 +25,21 @@ export type Operation =
   | { action: 'closePosition'; contract: Contract; quantity?: Decimal }
   | { action: 'cancelOrder'; orderId: string; orderCancel?: OrderCancel }
   | { action: 'syncOrders' }
+  | {
+      // Wallet-only event: bridges the gap between Alice's order log and a
+      // broker-reported balance change Alice did not initiate (first-sight
+      // bootstrap, external transfer, staking reward, off-platform trade).
+      // Treated as a virtual market buy/sell at observed price for cost-basis
+      // purposes — sign of quantityDelta determines direction.
+      //
+      // Numeric fields stored as Decimal-as-string so they survive JSON
+      // round-trip through git-persistence; reconstruct via `new Decimal(...)`
+      // at consumption sites.
+      action: 'reconcileBalance'
+      aliceId: string
+      quantityDelta: string
+      markPrice: string
+    }
 
 // ==================== Operation Result ====================
 
@@ -37,8 +52,10 @@ export interface OperationResult {
   status: OperationStatus
   execution?: Execution
   orderState?: OrderState
-  filledQty?: number
-  filledPrice?: number
+  /** Decimal as string — sub-satoshi fills must round-trip without loss. */
+  filledQty?: string
+  /** Decimal as string — see filledQty. */
+  filledPrice?: string
   error?: string
   raw?: unknown
 }
@@ -135,8 +152,9 @@ export interface OrderStatusUpdate {
   symbol: string
   previousStatus: OperationStatus
   currentStatus: OperationStatus
-  filledPrice?: number
-  filledQty?: number
+  /** Decimal as string — same precision invariant as OperationResult. */
+  filledPrice?: string
+  filledQty?: string
 }
 
 export interface SyncResult {
@@ -209,5 +227,6 @@ export function getOperationSymbol(op: Operation): string {
     case 'closePosition': return op.contract?.symbol || op.contract?.aliceId || 'unknown'
     case 'cancelOrder': return 'unknown'
     case 'syncOrders': return 'unknown'
+    case 'reconcileBalance': return op.aliceId
   }
 }

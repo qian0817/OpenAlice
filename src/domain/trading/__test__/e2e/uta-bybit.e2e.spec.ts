@@ -28,7 +28,7 @@ describe('UTA — Bybit lifecycle (ETH perp)', () => {
     broker = bybit.broker
 
     const results = await broker.searchContracts('ETH')
-    const perp = results.find(r => r.contract.localSymbol?.includes('USDT:USDT'))
+    const perp = results.find(r => r.contract.secType === 'CRYPTO_PERP')
     if (!perp) {
       console.log('e2e: No ETH/USDT perp found, skipping')
       broker = null
@@ -46,7 +46,7 @@ describe('UTA — Bybit lifecycle (ETH perp)', () => {
   it('buy → sync → verify → close → sync → verify', async () => {
     // Record initial state
     const initialPositions = await broker!.getPositions()
-    const initialEthQty = initialPositions.find(p => p.contract.localSymbol?.includes('USDT:USDT'))?.quantity.toNumber() ?? 0
+    const initialEthQty = initialPositions.find(p => p.contract.secType === 'CRYPTO_PERP')?.quantity.toNumber() ?? 0
     console.log(`  initial ETH qty=${initialEthQty}`)
 
     // === Stage + Commit + Push: buy 0.01 ETH ===
@@ -54,7 +54,7 @@ describe('UTA — Bybit lifecycle (ETH perp)', () => {
       aliceId: ethAliceId,
       action: 'BUY',
       orderType: 'MKT',
-      totalQuantity: 0.01,
+      totalQuantity: '0.01',
     })
     expect(addResult.staged).toBe(true)
     console.log(`  staged: ok`)
@@ -90,7 +90,7 @@ describe('UTA — Bybit lifecycle (ETH perp)', () => {
     expect(state1.pendingOrders).toHaveLength(0)
 
     // === Stage + Commit + Push: close 0.01 ETH ===
-    uta!.stageClosePosition({ aliceId: ethAliceId, qty: 0.01 })
+    uta!.stageClosePosition({ aliceId: ethAliceId, qty: '0.01' })
     uta!.commit('e2e: close 0.01 ETH')
     const closePush = await uta!.push()
     console.log(`  close pushed: submitted=${closePush.submitted.length}, status=${closePush.submitted[0]?.status}`)
@@ -108,7 +108,7 @@ describe('UTA — Bybit lifecycle (ETH perp)', () => {
 
     // === Verify: net change should be ~0 ===
     const finalPositions = await broker!.getPositions()
-    const finalEthQty = finalPositions.find(p => p.contract.localSymbol?.includes('USDT:USDT'))?.quantity.toNumber() ?? 0
+    const finalEthQty = finalPositions.find(p => p.contract.secType === 'CRYPTO_PERP')?.quantity.toNumber() ?? 0
     console.log(`  final ETH qty=${finalEthQty} (initial was ${initialEthQty})`)
     expect(Math.abs(finalEthQty - initialEthQty)).toBeLessThan(0.02)
 
@@ -120,11 +120,11 @@ describe('UTA — Bybit lifecycle (ETH perp)', () => {
 
   it('buy with TPSL → tpsl visible on fetched order', async () => {
     const quote = await broker!.getQuote(broker!.resolveNativeKey(ethAliceId.split('|')[1]))
-    const tpPrice = Math.round(quote.last * 1.5)
-    const slPrice = Math.round(quote.last * 0.5)
+    const tpPrice = Math.round(Number(quote.last) * 1.5)
+    const slPrice = Math.round(Number(quote.last) * 0.5)
 
     uta!.stagePlaceOrder({
-      aliceId: ethAliceId, action: 'BUY', orderType: 'MKT', totalQuantity: 0.01,
+      aliceId: ethAliceId, action: 'BUY', orderType: 'MKT', totalQuantity: '0.01',
       takeProfit: { price: String(tpPrice) },
       stopLoss: { price: String(slPrice) },
     })
@@ -148,7 +148,7 @@ describe('UTA — Bybit lifecycle (ETH perp)', () => {
     }
 
     // Clean up
-    uta!.stageClosePosition({ aliceId: ethAliceId, qty: 0.01 })
+    uta!.stageClosePosition({ aliceId: ethAliceId, qty: '0.01' })
     uta!.commit('e2e: close TPSL')
     await uta!.push()
   }, 60_000)

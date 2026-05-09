@@ -11,6 +11,8 @@ import Decimal from 'decimal.js'
 import { Contract, Order, ContractDescription, ContractDetails, UNSET_DECIMAL } from '@traderalice/ibkr'
 import { BrokerError, type IBroker, type AccountInfo, type Position, type OpenOrder, type PlaceOrderResult, type Quote, type MarketClock, type AccountCapabilities, type BrokerHealth, type BrokerHealthInfo, type TpSlParams } from './brokers/types.js'
 import { TradingGit } from './git/TradingGit.js'
+import { recomputeCostBasisFromCommits } from './cost-basis.js'
+import { pnlOf } from './position-math.js'
 import type {
   Operation,
   AddResult,
@@ -43,17 +45,24 @@ export interface UnifiedTradingAccountOptions {
 
 // ==================== Stage param types ====================
 
+/**
+ * All numeric fields are strings — Decimal precision must be
+ * preserved through the staging layer into the persisted git
+ * operation records. Callers (AI tools, HTTP routes) that have a
+ * number must convert via `String(x)` at the boundary; that's
+ * deliberate friction so the precision-loss point is explicit.
+ */
 export interface StagePlaceOrderParams {
   aliceId: string
   symbol?: string
   action: 'BUY' | 'SELL'
   orderType: string
-  totalQuantity?: number | string
-  cashQty?: number | string
-  lmtPrice?: number | string
-  auxPrice?: number | string
-  trailStopPrice?: number | string
-  trailingPercent?: number | string
+  totalQuantity?: string
+  cashQty?: string
+  lmtPrice?: string
+  auxPrice?: string
+  trailStopPrice?: string
+  trailingPercent?: string
   tif?: string
   goodTillDate?: string
   outsideRth?: boolean
@@ -65,11 +74,11 @@ export interface StagePlaceOrderParams {
 
 export interface StageModifyOrderParams {
   orderId: string
-  totalQuantity?: number | string
-  lmtPrice?: number | string
-  auxPrice?: number | string
-  trailStopPrice?: number | string
-  trailingPercent?: number | string
+  totalQuantity?: string
+  lmtPrice?: string
+  auxPrice?: string
+  trailStopPrice?: string
+  trailingPercent?: string
   orderType?: string
   tif?: string
   goodTillDate?: string
@@ -78,7 +87,8 @@ export interface StageModifyOrderParams {
 export interface StageClosePositionParams {
   aliceId: string
   symbol?: string
-  qty?: number
+  /** Empty / undefined closes the full position. */
+  qty?: string
 }
 
 // ==================== UnifiedTradingAccount ====================
@@ -459,10 +469,13 @@ export class UnifiedTradingAccount {
 
       const status = brokerOrder.orderState.status
       if (status !== 'Submitted' && status !== 'PreSubmitted') {
-        // Extract fill data when available
+        // Extract fill data when available — `.toFixed()` (not
+        // `.toNumber()`) so sub-satoshi qty (OKX-style accounting)
+        // round-trips into the persisted git operation record without
+        // IEEE-754 truncation.
         const orderFilledQty = brokerOrder.order.filledQuantity
         const filledQty = orderFilledQty && !orderFilledQty.equals(UNSET_DECIMAL)
-          ? orderFilledQty.toNumber()
+          ? orderFilledQty.toFixed()
           : undefined
 
         updates.push({
@@ -505,7 +518,84 @@ export class UnifiedTradingAccount {
   async getPositions(): Promise<Position[]> {
     const positions = await this._callBroker(() => this.broker.getPositions())
     for (const p of positions) this.stampAliceId(p.contract)
+    await this._reconcileWalletPositions(positions)
     return positions
+  }
+
+  /**
+   * For positions whose broker doesn't supply an authoritative avgCost
+   * (CCXT spot synthesis), reconstruct cost basis from Alice's order log
+   * — bootstrapping any quantity drift via a synthesized `reconcileBalance`
+   * commit at observed markPrice. Mutates `positions` in place: replaces
+   * the placeholder avgCost and recomputes unrealizedPnL.
+   */
+  private async _reconcileWalletPositions(positions: Position[]): Promise<void> {
+    const walletPositions = positions.filter(p => p.avgCostSource === 'wallet')
+    if (walletPositions.length === 0) return
+
+    for (const p of walletPositions) {
+      const aliceId = p.contract.aliceId
+      if (!aliceId) continue
+
+      const commits = this.git.exportState().commits
+      const projected = recomputeCostBasisFromCommits(commits, aliceId)
+      const projectedQty = projected?.qty ?? new Decimal(0)
+      const drift = p.quantity.minus(projectedQty)
+
+      // Tolerance: dust-level differences (sub-1e-8) come from precision
+      // round-trips, not from real balance changes.
+      if (drift.abs().gt(new Decimal('1e-8'))) {
+        // Bootstrap price: prefer broker-reported avgCost when non-zero
+        // (Mock externalTrade, future CCXT-with-fetchMyTrades, anything
+        // that observed a real fill price). Fall back to markPrice only
+        // when the broker has nothing — current CCXT spot synthesis sets
+        // avgCost equal to markPrice anyway, so the fallback case
+        // produces identical behavior there.
+        const brokerAvgCost = p.avgCost ? new Decimal(p.avgCost) : new Decimal(0)
+        const bootstrapPrice = brokerAvgCost.gt(0) ? brokerAvgCost : new Decimal(p.marketPrice)
+        await this.git.recordReconcile({
+          aliceId,
+          quantityDelta: drift,
+          markPrice: bootstrapPrice,
+          stateAfter: this._buildReconcileStateAfter(positions),
+        })
+      }
+
+      // Recompute (post-reconcile if drift was applied; otherwise unchanged).
+      const finalCommits = this.git.exportState().commits
+      const final = recomputeCostBasisFromCommits(finalCommits, aliceId)
+      if (!final) continue  // Should be unreachable — reconcile would seed it.
+
+      p.avgCost = final.avgCost.toString()
+      // Cost-basis WAC operates on per-unit prices; the IBroker.Position
+      // contract requires unrealizedPnL to be multiplier-applied.
+      // `pnlOf` enforces the rule (defaults multiplier to '1' if absent).
+      p.unrealizedPnL = pnlOf({
+        quantity: p.quantity,
+        marketPrice: p.marketPrice,
+        avgCost: final.avgCost,
+        multiplier: p.multiplier || '1',
+        side: p.side,
+      })
+    }
+  }
+
+  /**
+   * Build a minimal GitState for a synthesized reconcile commit. The cost-
+   * basis pipeline doesn't read stateAfter (it walks operations + results),
+   * but the field is required by GitCommit and downstream snapshot code may
+   * inspect it. We avoid recursing through `_getState` (which would refetch
+   * broker positions) by reusing the in-flight positions array.
+   */
+  private _buildReconcileStateAfter(positions: Position[]): GitState {
+    return {
+      netLiquidation: '0',
+      totalCashValue: '0',
+      unrealizedPnL: '0',
+      realizedPnL: '0',
+      positions,
+      pendingOrders: [],
+    }
   }
 
   async getOrders(orderIds: string[]): Promise<OpenOrder[]> {
@@ -528,6 +618,18 @@ export class UnifiedTradingAccount {
     const results = await this._callBroker(() => this.broker.searchContracts(pattern))
     for (const desc of results) this.stampAliceId(desc.contract)
     return results
+  }
+
+  /**
+   * Optional broker-side catalog refresh (Alpaca, CCXT, Mock — those that
+   * cache an enumerable list locally). No-op for brokers that source search
+   * server-side (IBKR). Caller — typically a cron job — gets a resolved
+   * promise either way and a thrown exception if the broker tried and
+   * failed to refresh.
+   */
+  async refreshCatalog(): Promise<void> {
+    if (typeof this.broker.refreshCatalog !== 'function') return
+    await this._callBroker(() => this.broker.refreshCatalog!())
   }
 
   async getContractDetails(query: Contract): Promise<ContractDetails | null> {

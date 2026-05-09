@@ -1,0 +1,201 @@
+import type { ComponentType } from 'react'
+import type { ChannelListItem } from '../api/channels'
+import type { ViewKind, ViewSpec } from './types'
+
+import { ChatPage } from '../pages/ChatPage'
+import { DiaryPage } from '../pages/DiaryPage'
+import { PortfolioPage } from '../pages/PortfolioPage'
+import { AutomationPage } from '../pages/AutomationPage'
+import { NewsPage } from '../pages/NewsPage'
+import { MarketPage } from '../pages/MarketPage'
+import { MarketDetailPage } from '../pages/MarketDetailPage'
+import { SettingsPage } from '../pages/SettingsPage'
+import { AIProviderPage } from '../pages/AIProviderPage'
+import { TradingPage } from '../pages/TradingPage'
+import { ConnectorsPage } from '../pages/ConnectorsPage'
+import { MarketDataPage } from '../pages/MarketDataPage'
+import { NewsCollectorPage } from '../pages/NewsCollectorPage'
+import { UTADetailPage } from '../pages/UTADetailPage'
+import { DevPage } from '../pages/DevPage'
+import { NotificationsInboxPage } from '../pages/NotificationsInboxPage'
+
+/**
+ * Central registry mapping each ViewKind to its render component and URL
+ * projection. Adding a new view kind means adding one entry here.
+ *
+ * Sidebar selection is decoupled from view kind — it's driven by
+ * ActivityBar via `selectedSidebar` in the workspace store. The registry
+ * no longer knows which sidebar a view "belongs to".
+ */
+
+export interface TitleCtx {
+  channels: ChannelListItem[]
+}
+
+interface ViewProps<K extends ViewKind> {
+  spec: Extract<ViewSpec, { kind: K }>
+  visible: boolean
+}
+
+export interface ViewModule<K extends ViewKind> {
+  kind: K
+  /** Tab title — derived from spec each render so e.g. channel renames propagate. */
+  title(spec: Extract<ViewSpec, { kind: K }>, ctx: TitleCtx): string
+  /** URL the active tab projects onto window.location (via replaceState). */
+  toUrl(spec: Extract<ViewSpec, { kind: K }>): string
+  /** The actual page component. Ignores `visible` unless it needs catch-up behaviour. */
+  Component: ComponentType<ViewProps<K>>
+}
+
+// ==================== Per-kind modules ====================
+
+const chatModule: ViewModule<'chat'> = {
+  kind: 'chat',
+  title(spec, ctx) {
+    const ch = ctx.channels.find((c) => c.id === spec.params.channelId)
+    return ch?.label ?? spec.params.channelId
+  },
+  toUrl(spec) {
+    return spec.params.channelId === 'default'
+      ? '/chat'
+      : `/chat/${encodeURIComponent(spec.params.channelId)}`
+  },
+  Component: ChatPage,
+}
+
+const diaryModule: ViewModule<'diary'> = {
+  kind: 'diary',
+  title: () => 'Diary',
+  toUrl: () => '/diary',
+  Component: () => <DiaryPage />,
+}
+
+const portfolioModule: ViewModule<'portfolio'> = {
+  kind: 'portfolio',
+  title: () => 'Portfolio',
+  toUrl: () => '/portfolio',
+  Component: () => <PortfolioPage />,
+}
+
+const automationSectionTitle: Record<
+  Extract<ViewSpec, { kind: 'automation' }>['params']['section'],
+  string
+> = {
+  flow: 'Flow',
+  heartbeat: 'Heartbeat',
+  cron: 'Cron Jobs',
+  webhook: 'Webhook',
+}
+
+const automationModule: ViewModule<'automation'> = {
+  kind: 'automation',
+  title: (spec) => automationSectionTitle[spec.params.section],
+  toUrl: (spec) => `/automation/${spec.params.section}`,
+  Component: AutomationPage,
+}
+
+const newsModule: ViewModule<'news'> = {
+  kind: 'news',
+  title: () => 'News',
+  toUrl: () => '/news',
+  Component: () => <NewsPage />,
+}
+
+const marketListModule: ViewModule<'market-list'> = {
+  kind: 'market-list',
+  title: () => 'Market',
+  toUrl: () => '/market',
+  Component: () => <MarketPage />,
+}
+
+const marketDetailModule: ViewModule<'market-detail'> = {
+  kind: 'market-detail',
+  title: (spec) => `${spec.params.symbol}`,
+  toUrl: (spec) =>
+    `/market/${spec.params.assetClass}/${encodeURIComponent(spec.params.symbol)}`,
+  Component: MarketDetailPage,
+}
+
+const settingsCategoryTitle: Record<
+  Extract<ViewSpec, { kind: 'settings' }>['params']['category'],
+  string
+> = {
+  general: 'Settings',
+  'ai-provider': 'AI Provider',
+  trading: 'Trading Accounts',
+  connectors: 'Connectors',
+  'market-data': 'Market Data',
+  'news-collector': 'News Sources',
+}
+
+function SettingsRouter({ spec }: ViewProps<'settings'>) {
+  switch (spec.params.category) {
+    case 'general': return <SettingsPage />
+    case 'ai-provider': return <AIProviderPage />
+    case 'trading': return <TradingPage />
+    case 'connectors': return <ConnectorsPage />
+    case 'market-data': return <MarketDataPage />
+    case 'news-collector': return <NewsCollectorPage />
+  }
+}
+
+const settingsModule: ViewModule<'settings'> = {
+  kind: 'settings',
+  title: (spec) => settingsCategoryTitle[spec.params.category],
+  toUrl: (spec) =>
+    spec.params.category === 'general'
+      ? '/settings'
+      : `/settings/${spec.params.category}`,
+  Component: SettingsRouter,
+}
+
+const utaDetailModule: ViewModule<'uta-detail'> = {
+  kind: 'uta-detail',
+  title: (spec) => `Account ${spec.params.id}`,
+  toUrl: (spec) => `/settings/uta/${encodeURIComponent(spec.params.id)}`,
+  Component: UTADetailPage,
+}
+
+const devTabTitle: Record<Extract<ViewSpec, { kind: 'dev' }>['params']['tab'], string> = {
+  connectors: 'Connectors',
+  tools: 'Tools',
+  sessions: 'Sessions',
+  snapshots: 'Snapshots',
+  logs: 'Logs',
+  simulator: 'Simulator',
+}
+
+const devModule: ViewModule<'dev'> = {
+  kind: 'dev',
+  title: (spec) => devTabTitle[spec.params.tab],
+  toUrl: (spec) => `/dev/${spec.params.tab}`,
+  Component: DevPage,
+}
+
+const notificationsInboxModule: ViewModule<'notifications-inbox'> = {
+  kind: 'notifications-inbox',
+  title: () => 'Notifications',
+  toUrl: () => '/notifications',
+  Component: NotificationsInboxPage,
+}
+
+// ==================== Aggregate ====================
+
+export const VIEWS = {
+  chat: chatModule,
+  diary: diaryModule,
+  portfolio: portfolioModule,
+  automation: automationModule,
+  news: newsModule,
+  'market-list': marketListModule,
+  'market-detail': marketDetailModule,
+  settings: settingsModule,
+  'uta-detail': utaDetailModule,
+  dev: devModule,
+  'notifications-inbox': notificationsInboxModule,
+} as const satisfies { [K in ViewKind]: ViewModule<K> }
+
+/** Untyped lookup — narrow at the call site by inspecting `spec.kind`. */
+export function getView<K extends ViewKind>(kind: K): ViewModule<K> {
+  return VIEWS[kind] as unknown as ViewModule<K>
+}

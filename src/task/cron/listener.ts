@@ -84,14 +84,14 @@ export function createCronListener(opts: CronListenerOpts): CronListener {
           historyPreamble: `You are operating in the cron job context (session: cron/default, job: ${payload.jobName}). This is an automated cron job execution.`,
         })
 
-        // Send notification through the last-interacted connector
+        // Append to notifications store; connectors fan out via onAppended.
         try {
           await connectorCenter.notify(result.text, {
             media: result.media,
             source: 'cron',
           })
         } catch (sendErr) {
-          console.warn(`cron-listener: send failed for job ${payload.jobId}:`, sendErr)
+          console.warn(`cron-listener: notify failed for job ${payload.jobId}:`, sendErr)
         }
 
         // Log success

@@ -8,6 +8,7 @@ import { createCronListener, type CronListener } from './listener.js'
 import { SessionStore } from '../../core/session.js'
 import type { CronFirePayload } from './engine.js'
 import { ConnectorCenter } from '../../core/connector-center.js'
+import { createMemoryNotificationsStore } from '../../core/notifications-store.js'
 
 function tempPath(ext: string): string {
   return join(tmpdir(), `cron-listener-test-${randomUUID()}.${ext}`)
@@ -42,6 +43,7 @@ describe('cron listener', () => {
   let session: SessionStore
   let logPath: string
   let connectorCenter: ConnectorCenter
+  let notificationsStore: ReturnType<typeof createMemoryNotificationsStore>
 
   beforeEach(async () => {
     logPath = tempPath('jsonl')
@@ -49,7 +51,8 @@ describe('cron listener', () => {
     registry = createListenerRegistry(eventLog)
     mockEngine = createMockEngine()
     session = new SessionStore(`test/cron-${randomUUID()}`)
-    connectorCenter = new ConnectorCenter()
+    notificationsStore = createMemoryNotificationsStore()
+    connectorCenter = new ConnectorCenter({ notificationsStore })
 
     cronListener = createCronListener({
       connectorCenter,
@@ -123,14 +126,9 @@ describe('cron listener', () => {
   // ==================== Delivery ====================
 
   describe('delivery', () => {
-    it('should deliver reply through connector registry', async () => {
+    it('should append AI reply to the notifications store', async () => {
       const delivered: string[] = []
-      connectorCenter.register({
-        channel: 'test',
-        to: 'user1',
-        capabilities: { push: true, media: false },
-        send: async (payload) => { delivered.push(payload.text); return { delivered: true } },
-      })
+      notificationsStore.onAppended((entry) => { delivered.push(entry.text) })
 
       await eventLog.append('cron.fire', {
         jobId: 'abc12345',
@@ -143,15 +141,15 @@ describe('cron listener', () => {
       })
 
       expect(delivered[0]).toBe('AI reply')
+
+      const { entries } = await notificationsStore.read()
+      expect(entries[0].source).toBe('cron')
     })
 
-    it('should handle delivery failure gracefully', async () => {
-      connectorCenter.register({
-        channel: 'test',
-        to: 'user1',
-        capabilities: { push: true, media: false },
-        send: async () => { throw new Error('send failed') },
-      })
+    it('should handle notify failure gracefully', async () => {
+      // Force the underlying append to throw — cron listener must keep
+      // the loop alive (still emit cron.done).
+      notificationsStore.append = async () => { throw new Error('store failed') }
 
       await eventLog.append('cron.fire', {
         jobId: 'abc12345',
@@ -159,22 +157,6 @@ describe('cron listener', () => {
         payload: 'Hello',
       } satisfies CronFirePayload)
 
-      // Should still write cron.done (delivery failure is non-fatal)
-      await vi.waitFor(() => {
-        const done = eventLog.recent({ type: 'cron.done' })
-        expect(done).toHaveLength(1)
-      })
-    })
-
-    it('should handle no connectors gracefully', async () => {
-      // No connectors registered
-      await eventLog.append('cron.fire', {
-        jobId: 'abc12345',
-        jobName: 'test-job',
-        payload: 'Hello',
-      } satisfies CronFirePayload)
-
-      // Should still write cron.done
       await vi.waitFor(() => {
         const done = eventLog.recent({ type: 'cron.done' })
         expect(done).toHaveLength(1)

@@ -16,7 +16,7 @@ export const channelsApi = {
     return res.json()
   },
 
-  async create(data: Omit<WebChannel, 'id'> & { id: string }): Promise<{ channel: ChannelListItem }> {
+  async create(data: Omit<WebChannel, 'id'>): Promise<{ channel: ChannelListItem }> {
     const res = await fetch('/api/channels', {
       method: 'POST',
       headers,

@@ -7,6 +7,23 @@ import { useAutoSave } from '../hooks/useAutoSave'
 import { PageHeader } from '../components/PageHeader'
 import { AutomationFlowSection } from './AutomationFlowSection'
 import { AutomationWebhookSection } from './AutomationWebhookSection'
+import type { ViewSpec } from '../tabs/types'
+
+type AutomationSection = Extract<ViewSpec, { kind: 'automation' }>['params']['section']
+
+const SECTION_TITLE: Record<AutomationSection, string> = {
+  flow: 'Flow',
+  heartbeat: 'Heartbeat',
+  cron: 'Cron Jobs',
+  webhook: 'Webhook',
+}
+
+const SECTION_DESCRIPTION: Record<AutomationSection, string> = {
+  flow: 'Producer-listener graph for the event bus.',
+  heartbeat: 'Periodic self-check and autonomous thinking.',
+  cron: 'Scheduled jobs that fire events on the dispatch bus.',
+  webhook: 'External HTTP triggers routed into the engine.',
+}
 
 // ==================== Helpers ====================
 
@@ -598,51 +615,31 @@ function AddCronJobForm({ onClose, onCreated }: { onClose: () => void; onCreated
 
 // ==================== Page ====================
 
-type Tab = 'flow' | 'heartbeat' | 'cron' | 'webhook'
+interface AutomationPageProps {
+  spec: Extract<ViewSpec, { kind: 'automation' }>
+}
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: 'flow', label: 'Flow' },
-  { key: 'heartbeat', label: 'Heartbeat' },
-  { key: 'cron', label: 'Cron Jobs' },
-  { key: 'webhook', label: 'Webhook' },
-]
-
-export function AutomationPage() {
-  const [tab, setTab] = useState<Tab>('flow')
+/**
+ * Automation page is sub-section-driven — `spec.params.section` picks which
+ * surface renders. The Automation sidebar holds one row per section so each
+ * section is its own tab in the editor area.
+ */
+export function AutomationPage({ spec }: AutomationPageProps) {
+  const section = spec.params.section
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <PageHeader
-        title="Automation"
-        description="Automated tasks — heartbeat, cron jobs, and scheduled actions."
+        title={SECTION_TITLE[section]}
+        description={SECTION_DESCRIPTION[section]}
       />
-
-      <div className="px-4 md:px-6 border-b border-border/60">
-        <div className="flex gap-1">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`px-3 py-2 text-sm font-medium transition-colors relative ${
-                tab === t.key ? 'text-accent' : 'text-text-muted hover:text-text'
-              }`}
-            >
-              {t.label}
-              {tab === t.key && (
-                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-accent rounded-t" />
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-
       <div className="flex-1 flex flex-col min-h-0 px-4 md:px-6 py-5">
         <div className="flex-1 min-h-0">
-          {tab === 'flow' ? (
+          {section === 'flow' ? (
             <AutomationFlowSection />
-          ) : tab === 'heartbeat' ? (
+          ) : section === 'heartbeat' ? (
             <HeartbeatSection />
-          ) : tab === 'cron' ? (
+          ) : section === 'cron' ? (
             <CronSection />
           ) : (
             <AutomationWebhookSection />

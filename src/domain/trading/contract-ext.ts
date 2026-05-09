@@ -1,17 +1,25 @@
 /**
  * Declaration merge: adds `aliceId` to IBKR Contract class.
  *
- * aliceId is Alice's unique asset identifier: "{utaId}|{nativeKey}"
- * e.g. "alpaca-paper|META", "bybit-main|ETH/USDT:USDT"
+ * aliceId is Alice's system-level unique asset identifier:
+ *   "{utaId}|{nativeKey}"
+ * e.g. "alpaca-paper|META", "bybit-main|ETH/USDT:USDT", "ibkr|265598" (conId)
  *
- * Constructed by UTA layer (not broker). Broker uses symbol/localSymbol for resolution.
- * The @traderalice/ibkr package stays a pure IBKR replica.
+ * Constructed by the UTA layer via `stampAliceId`. The `nativeKey` half
+ * comes from `broker.getNativeKey(contract)` — each broker chooses its
+ * own uniqueness primitive there:
  *
- * localSymbol semantics by broker:
- * - IBKR: exchange-native symbol (e.g., "AAPL", "ESZ4")
- * - Alpaca: ticker symbol (e.g., "AAPL")
- * - CCXT: unified market symbol (e.g., "ETH/USDT:USDT")
- * UTA uses localSymbol as nativeKey in aliceId: "{utaId}|{nativeKey}"
+ *   - IBKR:   `conId` (numeric — the only reliably unique key, since
+ *             symbol/localSymbol collide across the option-chain fanout)
+ *   - CCXT:   the unified wire symbol (`BTC/USDT:USDT`) — encodes
+ *             base+quote+settle, which CCXT considers structural
+ *   - Alpaca: ticker symbol (flat US-equities universe)
+ *   - Mock:   per-config nativeKey (tester-defined)
+ *
+ * `Contract.localSymbol` is **not** the system uniqueness primitive —
+ * each broker writes whatever its native data model dictates, no
+ * normalization across brokers. What matters is that getNativeKey
+ * returns the broker's actual primary key.
  */
 
 import '@traderalice/ibkr'

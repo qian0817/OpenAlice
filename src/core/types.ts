@@ -1,5 +1,5 @@
 import type { QueryExecutor } from '@traderalice/opentypebb'
-import type { AccountManager } from '../domain/trading/index.js'
+import type { UTAManager } from '../domain/trading/index.js'
 import type { FxService } from '../domain/trading/fx-service.js'
 import type { SnapshotService } from '../domain/trading/snapshot/index.js'
 import type { INewsProvider } from '../domain/news/types.js'
@@ -14,6 +14,7 @@ import type { ToolCallLog } from './tool-call-log.js'
 import type { ToolCenter } from './tool-center.js'
 import type { ListenerRegistry } from './listener-registry.js'
 import type { EventBus } from './event-bus.js'
+import type { INotificationsStore } from './notifications-store.js'
 
 export type { Config, WebChannel }
 
@@ -32,6 +33,8 @@ export interface ReconnectResult {
 export interface EngineContext {
   config: Config
   connectorCenter: ConnectorCenter
+  /** Canonical store of system notifications; connectors subscribe via onAppended. */
+  notificationsStore: INotificationsStore
   agentCenter: AgentCenter
   eventLog: EventLog
   toolCallLog: ToolCallLog
@@ -50,7 +53,7 @@ export interface EngineContext {
   marketSearch: MarketSearchDeps
 
   // Trading (unified account model)
-  accountManager: AccountManager
+  utaManager: UTAManager
   fxService: FxService
   snapshotService?: SnapshotService
   newsProvider?: INewsProvider

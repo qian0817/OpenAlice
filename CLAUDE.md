@@ -23,6 +23,18 @@ pnpm test           # Unit tests
 
 `pnpm build` uses tsup which is lenient — `tsc --noEmit` catches strict type errors that tsup ignores.
 
+## Subsystem guides
+
+Some parts of this codebase are structured in ways that aren't obvious from
+the code alone — easy to touch superficially, easy to miss load-bearing
+wiring. When working on one of these, read its guide first:
+
+- **Event / Listener / Producer system** — [docs/event-system.md](docs/event-system.md).
+  Read before adding a new event type, Listener, or Producer, or before
+  opening an event to HTTP via the webhook ingest. Has recipes + the full
+  list of files to touch for each kind of change, plus a "common pitfalls"
+  section for the kinds of things AI sessions have historically half-done.
+
 ## Working with TODO.md
 
 `TODO.md` at the repo root is the running backlog — deferred work, known
@@ -150,3 +162,127 @@ Centralized registry. `tool/` files register tools via `ToolCenter.register()`, 
 - `archive/dev-pre-beta6` is a historical snapshot — do not modify or delete
 - **After merging a PR**, always `git pull origin master` to sync local master. Stale local master causes confusion about what's merged and what's not.
 - **Before creating a PR**, always `git fetch origin master` to check what's already merged. Use `git log --oneline origin/master..HEAD` to verify only the intended commits are ahead. Stale local refs cause PRs with wrong diff.
+
+### Rolling dev → master PR convention
+
+Multiple Claude sessions hit `dev` in parallel; GitHub allows only **one
+open PR per (head, base) pair** anyway. So we keep a single rolling PR
+from `dev → master` and **append** to its body each session instead of
+opening fresh — otherwise each new PR loses the context of what other
+sessions did.
+
+**Before opening a new PR, always check first:**
+
+```bash
+gh pr list --base master --head dev --state open --json number,title,body
+```
+
+- **If a PR exists** → append your section to its body with
+  `gh pr edit <num> --body-file <(...)`. Don't open a new one.
+- **If none exists** → open with `gh pr create` using the template below.
+
+**PR body template:**
+
+```markdown
+## Summary
+<rolling thematic summary — latest session may rewrite this when new
+work meaningfully shifts the PR's framing>
+
+## Per-session contributions
+### YYYY-MM-DD — <session theme, e.g. "Market workbench tradeable card">
+- What changed (1–3 bullets)
+- Why
+- Key commits: `<sha-short>`, `<sha-short>`
+
+### YYYY-MM-DD — <prior session theme>
+…(append on top, keep prior sessions verbatim — never edit other sessions' entries)…
+
+## Full commit log
+<output of: git log --oneline origin/master..HEAD>
+(regenerate from scratch on each body update)
+
+## Test plan
+- [ ] tsc --noEmit clean
+- [ ] pnpm test passes
+- [ ] (session-specific manual verifications)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+```
+
+**When you append:**
+
+1. Refresh the "Full commit log" section from `git log --oneline origin/master..HEAD`.
+2. Add your "Per-session contributions" entry on top of the list, with today's date.
+3. Don't edit other sessions' entries — that's their record.
+4. Update "Summary" only if your work actually changes the PR's framing
+   (e.g., what was a "frontend tweak" PR becomes a "frontend + new domain
+   service" PR after your work).
+
+This keeps the PR description as a faithful audit trail across sessions,
+and lets reviewers see who-did-what without trawling the commit log alone.
+
+### Default vs. isolated branch — when to deviate from `dev`
+
+The default for any session is **work on `dev`** and let the rolling
+PR carry it to master. The exception is **invasive, long-running work
+that shouldn't share a branch with parallel sessions** — typically a
+refactor of shared types / cross-cutting infrastructure that, while
+in-flight, would force every other session to rebase against churn
+they don't have context for.
+
+Examples worth isolating: changing a base interface every broker
+implements; renaming or restructuring a module everyone imports from;
+multi-day schema migrations.
+Examples that stay on `dev`: any feature, any local fix, anything
+scoped to one subsystem.
+
+When isolation is the right call:
+
+```bash
+# Branch from master (clean baseline, dev's churn won't bleed in)
+git fetch origin
+git checkout master
+git pull origin master
+git checkout -b refactor/<short-name>
+
+# During the refactor, periodically rebase against master so the
+# eventual merge stays small. Skip dev — its session-by-session
+# churn is intentionally not part of the baseline you're testing
+# against.
+git fetch origin
+git rebase origin/master
+
+# When done, PR straight to master (NOT dev). The refactor is its own
+# coherent unit, reviewed end-to-end.
+git push -u origin refactor/<short-name>
+gh pr create --base master --head refactor/<short-name> ...
+```
+
+**After the refactor merges**, dev needs to absorb the new master so
+in-flight sessions land on the new baseline:
+
+```bash
+git checkout dev
+git pull origin dev
+git fetch origin
+git merge origin/master
+git push origin dev
+```
+
+In-flight rolling-PR work then sees the refactor in their next pull
+and rebases naturally. Their diffs against the refreshed `dev` may
+need real fix-ups (that's the cost of an invasive refactor — and
+the reason you isolated it in the first place).
+
+**Decision rule for the next session that starts work:** if `master`
+is currently ahead of `dev` (because a refactor branch just landed
+there), do `git checkout dev && git merge origin/master` *before*
+starting any new feature work. Otherwise your new commits will land
+on a stale baseline.
+
+**Parallel work happens in the cloud, not in local worktrees.** For a
+project this size, spinning up multiple local worktrees costs more
+in `pnpm install` / `data/` copying / port juggling than it saves.
+Hand parallel tracks off to cloud Claude sessions instead — each
+gets its own sandbox, returns a PR, and doesn't touch the local
+working tree.

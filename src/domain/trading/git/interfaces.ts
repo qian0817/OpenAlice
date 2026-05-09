@@ -5,6 +5,7 @@
  *   add → commit → push → log / show / status
  */
 
+import type Decimal from 'decimal.js'
 import type {
   CommitHash,
   Operation,
@@ -30,6 +31,16 @@ export interface ITradingGit {
   commit(message: string): CommitPrepareResult
   push(): Promise<PushResult>
   reject(reason?: string): Promise<RejectResult>
+
+  // ---- wallet reconciliation (synthesized commits) ----
+
+  recordReconcile(params: {
+    aliceId: string
+    quantityDelta: Decimal
+    markPrice: Decimal
+    stateAfter: GitState
+    message?: string
+  }): Promise<CommitHash>
 
   // ---- git log / show / status ----
 

@@ -501,6 +501,37 @@ describe('TradingGit', () => {
       expect(op.order.lmtPrice).toBeInstanceOf(Decimal)
       expect(op.order.lmtPrice.toNumber()).toBe(145.25)
     })
+
+    it('reconcileBalance commits survive JSON round-trip and log() does not throw', async () => {
+      // Regression: previously stored quantityDelta/markPrice as Decimal in the
+      // Operation type. After JSON.stringify (via onCommit persistence) they
+      // came back as strings, and `formatOperationChange` calling .gte()/.toFixed()
+      // exploded with "is not a function". Now the type is `string` end-to-end.
+      await git.recordReconcile({
+        aliceId: 'bybit-main|BTC',
+        quantityDelta: new Decimal('1.0093'),
+        markPrice: new Decimal('80569.90'),
+        stateAfter: makeGitState(),
+      })
+
+      const exported = JSON.parse(JSON.stringify(git.exportState()))
+      const restored = TradingGit.restore(exported, config)
+
+      // Direct field check — values stay as strings.
+      const commit = restored.show(restored.status().head!)
+      const op = commit!.operations[0] as Extract<Operation, { action: 'reconcileBalance' }>
+      expect(typeof op.quantityDelta).toBe('string')
+      expect(typeof op.markPrice).toBe('string')
+      expect(op.quantityDelta).toBe('1.0093')
+      expect(op.markPrice).toBe('80569.9')
+
+      // The crash path: log() walks commits, formatOperationChange parses
+      // the string back to Decimal via `new Decimal(...)`. Should not throw.
+      const log = restored.log()
+      expect(log).toHaveLength(1)
+      expect(log[0].operations[0].change).toContain('observed')
+      expect(log[0].operations[0].change).toContain('1.0093')
+    })
   })
 
   // ==================== setCurrentRound ====================
@@ -529,8 +560,8 @@ describe('TradingGit', () => {
             symbol: 'AAPL',
             previousStatus: 'submitted',
             currentStatus: 'filled',
-            filledPrice: 155,
-            filledQty: 10,
+            filledPrice: '155',
+            filledQty: '10',
           },
         ],
         state,
@@ -592,8 +623,8 @@ describe('TradingGit', () => {
           symbol: 'AAPL',
           previousStatus: 'submitted',
           currentStatus: 'filled',
-          filledPrice: 155,
-          filledQty: 10,
+          filledPrice: '155',
+          filledQty: '10',
         }],
         makeGitState(),
       )
@@ -644,7 +675,7 @@ describe('TradingGit', () => {
             marketValue: '1600',
             unrealizedPnL: '100',
             realizedPnL: '0',
-
+            multiplier: '1',
           },
         ],
       })
@@ -675,7 +706,7 @@ describe('TradingGit', () => {
             marketValue: '1600',
             unrealizedPnL: '100',
             realizedPnL: '0',
-
+            multiplier: '1',
           },
         ],
       })
@@ -697,12 +728,12 @@ describe('TradingGit', () => {
           {
             contract: makeContract({ symbol: 'AAPL' }),
             currency: 'USD', side: 'long', quantity: new Decimal(10), avgCost: '100', marketPrice: '100',
-            marketValue: '1000', unrealizedPnL: '0', realizedPnL: '0',
+            marketValue: '1000', unrealizedPnL: '0', realizedPnL: '0', multiplier: '1',
           },
           {
             contract: makeContract({ symbol: 'GOOG' }),
             currency: 'USD', side: 'long', quantity: new Decimal(5), avgCost: '200', marketPrice: '200',
-            marketValue: '1000', unrealizedPnL: '0', realizedPnL: '0',
+            marketValue: '1000', unrealizedPnL: '0', realizedPnL: '0', multiplier: '1',
           },
         ],
       })
@@ -722,7 +753,7 @@ describe('TradingGit', () => {
           {
             contract: makeContract({ symbol: 'AAPL' }),
             currency: 'USD', side: 'long', quantity: new Decimal(10), avgCost: '100', marketPrice: '100',
-            marketValue: '1000', unrealizedPnL: '0', realizedPnL: '0',
+            marketValue: '1000', unrealizedPnL: '0', realizedPnL: '0', multiplier: '1',
           },
         ],
       })

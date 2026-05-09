@@ -189,7 +189,7 @@ describe('UTA — getState', () => {
     broker.setPositions([makePosition()])
 
     // Push a limit order to create a pending entry in git history
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', symbol: 'AAPL', action: 'BUY', orderType: 'LMT', totalQuantity: 5, lmtPrice: 145 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', symbol: 'AAPL', action: 'BUY', orderType: 'LMT', totalQuantity: '5', lmtPrice: '145' })
     uta.commit('limit buy')
     await uta.push()
 
@@ -243,13 +243,13 @@ describe('UTA — stagePlaceOrder', () => {
   })
 
   it('sets BUY action', () => {
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: 10 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: '10' })
     const { order } = getStagedPlaceOrder(uta)
     expect(order.action).toBe('BUY')
   })
 
   it('sets SELL action', () => {
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'SELL', orderType: 'MKT', totalQuantity: 10 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'SELL', orderType: 'MKT', totalQuantity: '10' })
     const { order } = getStagedPlaceOrder(uta)
     expect(order.action).toBe('SELL')
   })
@@ -258,48 +258,48 @@ describe('UTA — stagePlaceOrder', () => {
     const types = ['MKT', 'LMT', 'STP', 'STP LMT', 'TRAIL']
     for (const orderType of types) {
       const { uta: u } = createUTA()
-      u.stagePlaceOrder({ aliceId: 'mock-paper|X', action: 'BUY', orderType, totalQuantity: 1 })
+      u.stagePlaceOrder({ aliceId: 'mock-paper|X', action: 'BUY', orderType, totalQuantity: '1' })
       const { order } = getStagedPlaceOrder(u)
       expect(order.orderType).toBe(orderType)
     }
   })
 
   it('sets totalQuantity as Decimal', () => {
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: 42 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: '42' })
     const { order } = getStagedPlaceOrder(uta)
     expect(order.totalQuantity).toBeInstanceOf(Decimal)
     expect(order.totalQuantity.toNumber()).toBe(42)
   })
 
   it('sets cashQty', () => {
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', cashQty: 5000 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', cashQty: '5000' })
     const { order } = getStagedPlaceOrder(uta)
     expect(order.cashQty.toNumber()).toBe(5000)
   })
 
   it('sets lmtPrice and auxPrice', () => {
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'STP LMT', totalQuantity: 10, lmtPrice: 150, auxPrice: 145 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'STP LMT', totalQuantity: '10', lmtPrice: '150', auxPrice: '145' })
     const { order } = getStagedPlaceOrder(uta)
     expect(order.lmtPrice.toNumber()).toBe(150)
     expect(order.auxPrice.toNumber()).toBe(145)
   })
 
   it('auxPrice sets trailing offset for TRAIL orders', () => {
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'SELL', orderType: 'TRAIL', totalQuantity: 10, auxPrice: 5 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'SELL', orderType: 'TRAIL', totalQuantity: '10', auxPrice: '5' })
     const { order } = getStagedPlaceOrder(uta)
     expect(order.auxPrice.toNumber()).toBe(5)
     expect(order.orderType).toBe('TRAIL')
   })
 
   it('TRAIL order with trailStopPrice and auxPrice', () => {
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'SELL', orderType: 'TRAIL', totalQuantity: 10, trailStopPrice: 145, auxPrice: 5 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'SELL', orderType: 'TRAIL', totalQuantity: '10', trailStopPrice: '145', auxPrice: '5' })
     const { order } = getStagedPlaceOrder(uta)
     expect(order.trailStopPrice.toNumber()).toBe(145)
     expect(order.auxPrice.toNumber()).toBe(5)
   })
 
   it('sets trailingPercent', () => {
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'SELL', orderType: 'TRAIL', totalQuantity: 10, trailingPercent: 2.5 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'SELL', orderType: 'TRAIL', totalQuantity: '10', trailingPercent: '2.5' })
     const { order } = getStagedPlaceOrder(uta)
     expect(order.trailingPercent.toNumber()).toBe(2.5)
   })
@@ -317,7 +317,7 @@ describe('UTA — stagePlaceOrder', () => {
   it('JSON round-trips staged price as string (not number)', () => {
     uta.stagePlaceOrder({
       aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'LMT',
-      totalQuantity: 10, lmtPrice: 145.25,
+      totalQuantity: '10', lmtPrice: '145.25',
     })
     const wire = JSON.parse(JSON.stringify(uta.status()))
     const staged = wire.staged[0]
@@ -327,39 +327,39 @@ describe('UTA — stagePlaceOrder', () => {
   })
 
   it('defaults tif to DAY', () => {
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: 10 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: '10' })
     const { order } = getStagedPlaceOrder(uta)
     expect(order.tif).toBe('DAY')
   })
 
   it('allows overriding tif', () => {
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'LMT', totalQuantity: 10, lmtPrice: 150, tif: 'GTC' })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'LMT', totalQuantity: '10', lmtPrice: '150', tif: 'GTC' })
     const { order } = getStagedPlaceOrder(uta)
     expect(order.tif).toBe('GTC')
   })
 
   it('sets outsideRth', () => {
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'LMT', totalQuantity: 10, lmtPrice: 150, outsideRth: true })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'LMT', totalQuantity: '10', lmtPrice: '150', outsideRth: true })
     const { order } = getStagedPlaceOrder(uta)
     expect(order.outsideRth).toBe(true)
   })
 
   it('sets aliceId and symbol on contract', () => {
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', symbol: 'AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: 10 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', symbol: 'AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: '10' })
     const { contract } = getStagedPlaceOrder(uta)
     expect(contract.aliceId).toBe('mock-paper|AAPL')
     expect(contract.symbol).toBe('AAPL')
   })
 
   it('sets tpsl with takeProfit only', () => {
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: 10, takeProfit: { price: '160' } })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: '10', takeProfit: { price: '160' } })
     const staged = uta.status().staged
     const op = staged[0] as Extract<Operation, { action: 'placeOrder' }>
     expect(op.tpsl).toEqual({ takeProfit: { price: '160' }, stopLoss: undefined })
   })
 
   it('sets tpsl with stopLoss only', () => {
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: 10, stopLoss: { price: '140' } })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: '10', stopLoss: { price: '140' } })
     const staged = uta.status().staged
     const op = staged[0] as Extract<Operation, { action: 'placeOrder' }>
     expect(op.tpsl).toEqual({ takeProfit: undefined, stopLoss: { price: '140' } })
@@ -367,7 +367,7 @@ describe('UTA — stagePlaceOrder', () => {
 
   it('sets tpsl with both TP and SL', () => {
     uta.stagePlaceOrder({
-      aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: 10,
+      aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: '10',
       takeProfit: { price: '160' }, stopLoss: { price: '140', limitPrice: '139.50' },
     })
     const staged = uta.status().staged
@@ -379,7 +379,7 @@ describe('UTA — stagePlaceOrder', () => {
   })
 
   it('omits tpsl when neither TP nor SL provided', () => {
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: 10 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: '10' })
     const staged = uta.status().staged
     const op = staged[0] as Extract<Operation, { action: 'placeOrder' }>
     expect(op.tpsl).toBeUndefined()
@@ -396,7 +396,7 @@ describe('UTA — stageModifyOrder', () => {
   })
 
   it('sets provided fields on Partial<Order>', () => {
-    uta.stageModifyOrder({ orderId: 'ord-1', totalQuantity: 20, lmtPrice: 155, orderType: 'LMT', tif: 'GTC' })
+    uta.stageModifyOrder({ orderId: 'ord-1', totalQuantity: '20', lmtPrice: '155', orderType: 'LMT', tif: 'GTC' })
     const staged = uta.status().staged
     expect(staged).toHaveLength(1)
     const op = staged[0] as Extract<Operation, { action: 'modifyOrder' }>
@@ -410,7 +410,7 @@ describe('UTA — stageModifyOrder', () => {
   })
 
   it('omits fields not provided', () => {
-    uta.stageModifyOrder({ orderId: 'ord-1', lmtPrice: 160 })
+    uta.stageModifyOrder({ orderId: 'ord-1', lmtPrice: '160' })
     const staged = uta.status().staged
     const op = staged[0] as Extract<Operation, { action: 'modifyOrder' }>
     expect(op.changes.lmtPrice!.toNumber()).toBe(160)
@@ -430,7 +430,7 @@ describe('UTA — stageClosePosition', () => {
   })
 
   it('stages with Decimal quantity when qty provided', () => {
-    uta.stageClosePosition({ aliceId: 'mock-paper|AAPL', qty: 5 })
+    uta.stageClosePosition({ aliceId: 'mock-paper|AAPL', qty: '5' })
     const staged = uta.status().staged
     const op = staged[0] as Extract<Operation, { action: 'closePosition' }>
     expect(op.action).toBe('closePosition')
@@ -475,15 +475,15 @@ describe('UTA — git flow', () => {
   })
 
   it('push throws when not committed', async () => {
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: 10 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: '10' })
     await expect(uta.push()).rejects.toThrow('please commit first')
   })
 
   it('executes multiple operations in a single push', async () => {
     const { uta: u, broker: b } = createUTA()
     const spy = vi.spyOn(b, 'placeOrder')
-    u.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: 10 })
-    u.stagePlaceOrder({ aliceId: 'mock-paper|MSFT', symbol: 'MSFT', action: 'BUY', orderType: 'MKT', totalQuantity: 5 })
+    u.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: '10' })
+    u.stagePlaceOrder({ aliceId: 'mock-paper|MSFT', symbol: 'MSFT', action: 'BUY', orderType: 'MKT', totalQuantity: '5' })
     u.commit('buy both')
     await u.push()
 
@@ -491,7 +491,7 @@ describe('UTA — git flow', () => {
   })
 
   it('clears staging area after push', async () => {
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: 10 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: '10' })
     uta.commit('buy')
     await uta.push()
 
@@ -512,7 +512,7 @@ describe('UTA — sync', () => {
     const { uta, broker } = createUTA()
 
     // Limit order → MockBroker keeps it pending naturally
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', symbol: 'AAPL', action: 'BUY', orderType: 'LMT', totalQuantity: 10, lmtPrice: 150 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', symbol: 'AAPL', action: 'BUY', orderType: 'LMT', totalQuantity: '10', lmtPrice: '150' })
     uta.commit('limit buy')
     const pushResult = await uta.push()
     const orderId = pushResult.submitted[0]?.orderId
@@ -531,7 +531,7 @@ describe('UTA — sync', () => {
     const { uta, broker } = createUTA()
 
     // Limit order → pending
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', symbol: 'AAPL', action: 'BUY', orderType: 'LMT', totalQuantity: 10, lmtPrice: 150 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', symbol: 'AAPL', action: 'BUY', orderType: 'LMT', totalQuantity: '10', lmtPrice: '150' })
     uta.commit('limit buy')
     const pushResult = await uta.push()
     const orderId = pushResult.submitted[0]?.orderId
@@ -553,7 +553,7 @@ describe('UTA — guards', () => {
     })
     const spy = vi.spyOn(broker, 'placeOrder')
 
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|TSLA', symbol: 'TSLA', action: 'BUY', orderType: 'MKT', totalQuantity: 10 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|TSLA', symbol: 'TSLA', action: 'BUY', orderType: 'MKT', totalQuantity: '10' })
     uta.commit('buy TSLA (should be blocked)')
     const result = await uta.push()
 
@@ -568,7 +568,7 @@ describe('UTA — guards', () => {
     })
     const spy = vi.spyOn(broker, 'placeOrder')
 
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', symbol: 'AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: 10 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', symbol: 'AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: '10' })
     uta.commit('buy AAPL (allowed)')
     await uta.push()
 
@@ -582,7 +582,7 @@ describe('UTA — constructor', () => {
   it('restores from savedState', async () => {
     // Create a UTA, push a commit, export state
     const { uta: original } = createUTA()
-    original.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', symbol: 'AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: 10 })
+    original.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', symbol: 'AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: '10' })
     original.commit('initial buy')
     await original.push()
 
@@ -710,7 +710,7 @@ describe('UTA — health tracking', () => {
       await expect(uta.getAccount()).rejects.toThrow()
     }
 
-    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: 10 })
+    uta.stagePlaceOrder({ aliceId: 'mock-paper|AAPL', action: 'BUY', orderType: 'MKT', totalQuantity: '10' })
     uta.commit('buy AAPL')
     await expect(uta.push()).rejects.toThrow(/offline/)
     await uta.close()
@@ -773,5 +773,179 @@ describe('UTA — health tracking', () => {
     // Success on a different method resets
     await uta.getMarketClock()
     expect(uta.health).toBe('healthy')
+  })
+})
+
+// ==================== Wallet cost-basis reconciliation ====================
+
+describe('UTA — getPositions wallet reconciliation', () => {
+  it('passes through positions with avgCostSource=broker untouched', async () => {
+    const broker = new MockBroker()
+    broker.setPositions([makePosition({ avgCostSource: 'broker', avgCost: '150', marketPrice: '160', unrealizedPnL: '100' })])
+    const { uta } = createUTA(broker)
+    const positions = await uta.getPositions()
+    expect(positions[0].avgCost).toBe('150')
+    expect(positions[0].unrealizedPnL).toBe('100')
+  })
+
+  it('passes through positions without avgCostSource (back-compat)', async () => {
+    const broker = new MockBroker()
+    broker.setPositions([makePosition({ avgCost: '150', marketPrice: '160', unrealizedPnL: '100' })])
+    const { uta } = createUTA(broker)
+    const positions = await uta.getPositions()
+    expect(positions[0].avgCost).toBe('150')
+    expect(positions[0].unrealizedPnL).toBe('100')
+  })
+
+  it('bootstraps at broker-reported avgCost when it differs from markPrice', async () => {
+    // Mock externalTrade scenario: broker observed a real fill at $148.50,
+    // current mark is $152. Bootstrap should use the trade price, not mark
+    // — otherwise we destroy the broker's correct cost basis on first sight
+    // (covered call test surfaced this 2026-05-07: AAPL bought at $148.50,
+    // mark at $152, UI showed avgCost=$152 / PnL=0 instead of avgCost=$148.50
+    // / PnL=+$350).
+    const broker = new MockBroker()
+    broker.setPositions([makePosition({
+      contract: makeContract({ symbol: 'AAPL', secType: 'STK' }),
+      quantity: new Decimal('100'),
+      avgCost: '148.50',           // broker has the real trade price
+      marketPrice: '152',          // mark moved up
+      unrealizedPnL: '0',
+      avgCostSource: 'wallet',
+    })])
+    const { uta } = createUTA(broker)
+
+    const positions = await uta.getPositions()
+    expect(new Decimal(positions[0].avgCost).toNumber()).toBeCloseTo(148.50, 4)
+    expect(new Decimal(positions[0].unrealizedPnL).toNumber()).toBeCloseTo(350, 4)
+
+    // Reconcile commit recorded the drift at the trade price, not markPrice.
+    const commits = uta.git.exportState().commits
+    const reconciles = commits.filter(c => c.operations.some(op => op.action === 'reconcileBalance'))
+    expect(reconciles).toHaveLength(1)
+    const op = reconciles[0].operations[0] as Extract<Operation, { action: 'reconcileBalance' }>
+    expect(new Decimal(op.markPrice).toNumber()).toBeCloseTo(148.50, 4)
+  })
+
+  it('bootstraps a wallet position with no history → reconcile at markPrice, PnL=0', async () => {
+    const broker = new MockBroker()
+    broker.setPositions([makePosition({
+      contract: makeContract({ symbol: 'BTC' }),
+      quantity: new Decimal('1.0093'),
+      avgCost: '80569.90',
+      marketPrice: '80569.90',
+      unrealizedPnL: '0',
+      avgCostSource: 'wallet',
+    })])
+    const { uta } = createUTA(broker)
+
+    const positions = await uta.getPositions()
+    expect(new Decimal(positions[0].avgCost).toNumber()).toBeCloseTo(80569.90, 4)
+    expect(positions[0].unrealizedPnL).toBe('0')
+
+    // Synthetic reconcile commit was created
+    const commits = uta.git.exportState().commits
+    const reconciles = commits.filter(c => c.operations.some(op => op.action === 'reconcileBalance'))
+    expect(reconciles).toHaveLength(1)
+    const op = reconciles[0].operations[0] as Extract<Operation, { action: 'reconcileBalance' }>
+    expect(op.aliceId).toBe('mock-paper|BTC')
+    expect(new Decimal(op.quantityDelta).toNumber()).toBeCloseTo(1.0093, 4)
+  })
+
+  it('uses markPrice drift to compute true PnL after first observation', async () => {
+    const broker = new MockBroker()
+    broker.setPositions([makePosition({
+      contract: makeContract({ aliceId: 'mock-paper|BTC' }),
+      quantity: new Decimal('1'),
+      avgCost: '80000',  // placeholder = markPrice on first sight
+      marketPrice: '80000',
+      unrealizedPnL: '0',
+      avgCostSource: 'wallet',
+    })])
+    const { uta } = createUTA(broker)
+    await uta.getPositions()  // bootstrap
+
+    // Price moves up. avgCost should stay at the bootstrap price; PnL reflects change.
+    broker.setPositions([makePosition({
+      contract: makeContract({ aliceId: 'mock-paper|BTC' }),
+      quantity: new Decimal('1'),
+      avgCost: '90000',  // broker placeholder updates to current markPrice
+      marketPrice: '90000',
+      unrealizedPnL: '0',
+      avgCostSource: 'wallet',
+    })])
+    const positions = await uta.getPositions()
+    expect(new Decimal(positions[0].avgCost).toNumber()).toBe(80000)
+    expect(new Decimal(positions[0].unrealizedPnL).toNumber()).toBe(10000)
+  })
+
+  it('reconciles upward drift: broker reports more qty than git projects', async () => {
+    const broker = new MockBroker()
+    broker.setPositions([makePosition({
+      contract: makeContract({ aliceId: 'mock-paper|BTC' }),
+      quantity: new Decimal('1'),
+      avgCost: '80000',
+      marketPrice: '80000',
+      avgCostSource: 'wallet',
+    })])
+    const { uta } = createUTA(broker)
+    await uta.getPositions()  // first sight: bootstrap 1 BTC @ 80k
+
+    // External deposit: broker now reports 1.5 BTC. markPrice climbed to 100k.
+    broker.setPositions([makePosition({
+      contract: makeContract({ aliceId: 'mock-paper|BTC' }),
+      quantity: new Decimal('1.5'),
+      avgCost: '100000',
+      marketPrice: '100000',
+      avgCostSource: 'wallet',
+    })])
+    const positions = await uta.getPositions()
+
+    // WAC over (1@80k bootstrap, 0.5@100k drift) = (80000 + 50000) / 1.5 ≈ 86666.67
+    expect(new Decimal(positions[0].avgCost).toNumber()).toBeCloseTo(86666.67, 2)
+    // PnL = (100000 - 86666.67) * 1.5 ≈ 20000
+    expect(new Decimal(positions[0].unrealizedPnL).toNumber()).toBeCloseTo(20000, 0)
+  })
+
+  it('does not synthesize reconcile for sub-dust drift', async () => {
+    const broker = new MockBroker()
+    broker.setPositions([makePosition({
+      contract: makeContract({ aliceId: 'mock-paper|BTC' }),
+      quantity: new Decimal('1'),
+      avgCost: '80000',
+      marketPrice: '80000',
+      avgCostSource: 'wallet',
+    })])
+    const { uta } = createUTA(broker)
+    await uta.getPositions()  // bootstrap commit 1
+
+    // Same qty (modulo dust) — no new commit should be added.
+    broker.setPositions([makePosition({
+      contract: makeContract({ aliceId: 'mock-paper|BTC' }),
+      quantity: new Decimal('1.000000001'),
+      avgCost: '80000',
+      marketPrice: '80000',
+      avgCostSource: 'wallet',
+    })])
+    const before = uta.git.exportState().commits.length
+    await uta.getPositions()
+    const after = uta.git.exportState().commits.length
+    expect(after).toBe(before)
+  })
+
+  it('skips positions without aliceId (defensive)', async () => {
+    const broker = new MockBroker()
+    const contract = makeContract()
+    contract.aliceId = ''  // simulate broker that didn't stamp
+    broker.setPositions([makePosition({
+      contract,
+      quantity: new Decimal('1'),
+      avgCost: '50000',
+      marketPrice: '60000',
+      avgCostSource: 'wallet',
+    })])
+    const { uta } = createUTA(broker)
+    // UTA's stampAliceId will fill it, but if broker emits without symbol/contract id we fall through cleanly.
+    await expect(uta.getPositions()).resolves.toBeDefined()
   })
 })

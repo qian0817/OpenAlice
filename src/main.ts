@@ -1,14 +1,14 @@
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { resolve, dirname } from 'path'
 // Engine removed — AgentCenter is the top-level AI entry point
-import { loadConfig, readAccountsConfig } from './core/config.js'
+import { loadConfig, readUTAsConfig, purgeEphemeralUTAs } from './core/config.js'
 import type { Plugin, EngineContext, ReconnectResult } from './core/types.js'
 import { McpPlugin } from './server/mcp.js'
 import { TelegramPlugin } from './connectors/telegram/index.js'
-import { WebPlugin } from './connectors/web/index.js'
+import { WebPlugin } from './webui/index.js'
 import { McpAskPlugin } from './connectors/mcp-ask/index.js'
 import { createThinkingTools } from './tool/thinking.js'
-import { AccountManager, createSnapshotService, createSnapshotScheduler } from './domain/trading/index.js'
+import { UTAManager, createSnapshotService, createSnapshotScheduler } from './domain/trading/index.js'
 import { FxService } from './domain/trading/fx-service.js'
 import { createTradingTools } from './tool/trading.js'
 import { Brain } from './domain/brain/index.js'
@@ -21,18 +21,21 @@ import { AkshareEquityClient } from './domain/market-data/client/akshare/index.j
 import { CommodityCatalog } from './domain/market-data/commodity/index.js'
 import { createEquityTools } from './tool/equity.js'
 import { createChinaEquityTools } from './tool/china-equity.js'
-import { getSDKExecutor, buildRouteMap, SDKEquityClient, SDKCryptoClient, SDKCurrencyClient, SDKEtfClient, SDKIndexClient, SDKDerivativesClient, SDKCommodityClient } from './domain/market-data/client/typebb/index.js'
-import type { EquityClientLike, CryptoClientLike, CurrencyClientLike, EtfClientLike, IndexClientLike, DerivativesClientLike, CommodityClientLike } from './domain/market-data/client/types.js'
+import { getSDKExecutor, buildRouteMap, SDKEquityClient, SDKCryptoClient, SDKCurrencyClient, SDKEtfClient, SDKIndexClient, SDKDerivativesClient, SDKCommodityClient, SDKEconomyClient } from './domain/market-data/client/typebb/index.js'
+import type { EquityClientLike, CryptoClientLike, CurrencyClientLike, EtfClientLike, IndexClientLike, DerivativesClientLike, CommodityClientLike, EconomyClientLike } from './domain/market-data/client/types.js'
 import { buildSDKCredentials } from './domain/market-data/credential-map.js'
 import { OpenBBEquityClient } from './domain/market-data/client/openbb-api/equity-client.js'
 import { OpenBBCryptoClient } from './domain/market-data/client/openbb-api/crypto-client.js'
 import { OpenBBCurrencyClient } from './domain/market-data/client/openbb-api/currency-client.js'
 import { OpenBBCommodityClient } from './domain/market-data/client/openbb-api/commodity-client.js'
+import { OpenBBEconomyClient } from './domain/market-data/client/openbb-api/economy-client.js'
 import { createMarketSearchTools } from './tool/market.js'
 import { createAnalysisTools } from './tool/analysis.js'
+import { createEconomyTools } from './tool/economy.js'
 import { createSessionTools } from './tool/session.js'
 import { SessionStore } from './core/session.js'
 import { ConnectorCenter } from './core/connector-center.js'
+import { createNotificationsStore } from './core/notifications-store.js'
 import { ToolCenter } from './core/tool-center.js'
 import { AgentCenter } from './core/agent-center.js'
 import { GenerateRouter } from './core/ai-provider-manager.js'
@@ -98,25 +101,28 @@ async function main() {
 
   const listenerRegistry = createListenerRegistry(eventLog)
 
-  // ==================== Tool Center (created early — AccountManager needs it) ====================
+  // ==================== Tool Center (created early — UTAManager needs it) ====================
 
   const toolCenter = new ToolCenter()
 
   // ==================== Trading Account Manager ====================
 
-  const accountManager = new AccountManager({ eventLog, toolCenter })
+  const utaManager = new UTAManager({ eventLog, toolCenter })
 
-  const accountConfigs = await readAccountsConfig()
-  for (const accCfg of accountConfigs) {
+  // Ephemeral test UTAs from a previous session are purged before init —
+  // their config rows are removed and `data/trading/<id>/` is wiped, so
+  // fixture-driven tests start each session from a clean slate.
+  const survivors = await purgeEphemeralUTAs(await readUTAsConfig())
+  for (const accCfg of survivors) {
     if (accCfg.enabled === false) continue
-    await accountManager.initAccount(accCfg)
+    await utaManager.initUTA(accCfg)
   }
-  accountManager.registerCcxtToolsIfNeeded()
+  utaManager.registerCcxtToolsIfNeeded()
 
   // ==================== Snapshot ====================
 
-  const snapshotService = createSnapshotService({ accountManager, eventLog })
-  accountManager.setSnapshotHooks({
+  const snapshotService = createSnapshotService({ utaManager, eventLog })
+  utaManager.setSnapshotHooks({
     onPostPush: (id) => { snapshotService.takeSnapshot(id, 'post-push') },
     onPostReject: (id) => { snapshotService.takeSnapshot(id, 'post-reject') },
   })
@@ -182,6 +188,7 @@ async function main() {
   let etfClient: EtfClientLike | undefined
   let indexClient: IndexClientLike | undefined
   let derivativesClient: DerivativesClientLike | undefined
+  let economyClient: EconomyClientLike
 
   if (config.marketData.backend === 'openbb-api') {
     const url = config.marketData.apiUrl
@@ -189,7 +196,8 @@ async function main() {
     equityClient = new OpenBBEquityClient(url, providers.equity, keys)
     cryptoClient = new OpenBBCryptoClient(url, providers.crypto, keys)
     currencyClient = new OpenBBCurrencyClient(url, providers.currency, keys)
-    commodityClient = new OpenBBCommodityClient(url, providers.commodity, keys)
+    commodityClient = new OpenBBCommodityClient(url, providers.commodity, keys) as unknown as CommodityClientLike
+    economyClient = new OpenBBEconomyClient(url, 'federal_reserve', keys) as unknown as EconomyClientLike
   } else {
     const executor = getSDKExecutor()
     const routeMap = buildRouteMap()
@@ -201,12 +209,13 @@ async function main() {
     etfClient = new SDKEtfClient(executor, 'etf', providers.equity, credentials, routeMap)
     indexClient = new SDKIndexClient(executor, 'index', providers.equity, credentials, routeMap)
     derivativesClient = new SDKDerivativesClient(executor, 'derivatives', providers.equity, credentials, routeMap)
+    economyClient = new SDKEconomyClient(executor, 'economy', 'federal_reserve', credentials, routeMap)
   }
 
   // ==================== FX Service ====================
 
   const fxService = new FxService(currencyClient)
-  accountManager.setFxService(fxService)
+  utaManager.setFxService(fxService)
 
   // ==================== Equity Symbol Index ====================
 
@@ -237,7 +246,7 @@ async function main() {
 
   // One unified set of trading tools — routes via `source` parameter at runtime
   toolCenter.register(
-    createTradingTools(accountManager, fxService),
+    createTradingTools(utaManager, fxService),
     'trading',
   )
 
@@ -250,6 +259,7 @@ async function main() {
     toolCenter.register(createNewsArchiveTools(newsStore), 'news')
   }
   toolCenter.register(createAnalysisTools(equityClient, cryptoClient, currencyClient, commodityClient), 'analysis')
+  toolCenter.register(createEconomyTools(economyClient, commodityClient), 'economy')
 
   console.log(`tool-center: ${toolCenter.list().length} tools registered`)
 
@@ -276,9 +286,10 @@ async function main() {
     toolCallLog,
   })
 
-  // ==================== Connector Center ====================
+  // ==================== Notifications store + Connector Center ====================
 
-  const connectorCenter = new ConnectorCenter({ eventLog, listenerRegistry })
+  const notificationsStore = createNotificationsStore()
+  const connectorCenter = new ConnectorCenter({ eventLog, listenerRegistry, notificationsStore })
 
   // Session awareness tools (registered here because they need connectorCenter)
   toolCenter.register(createSessionTools(connectorCenter), 'session')
@@ -426,12 +437,12 @@ async function main() {
   // ==================== Engine Context ====================
 
   const ctx: EngineContext = {
-    config, connectorCenter, agentCenter, eventLog, toolCallLog, heartbeat, cronEngine, toolCenter,
+    config, connectorCenter, notificationsStore, agentCenter, eventLog, toolCallLog, heartbeat, cronEngine, toolCenter,
     listenerRegistry,
     fire: createEventBus(eventLog),
     bbEngine: getSDKExecutor(),
     marketSearch,
-    accountManager, fxService, snapshotService,
+    utaManager, fxService, snapshotService,
     newsProvider: newsStore,
     reconnectConnectors,
   }
@@ -443,17 +454,36 @@ async function main() {
 
   console.log('engine: started')
 
+  // ==================== Broker catalog refresh ====================
+  // Brokers that cache their catalog locally (Alpaca, CCXT, Mock) need
+  // periodic refreshes so newly listed assets surface in search and
+  // delisted ones drop. The optional `refreshCatalog` is a no-op for
+  // brokers that don't cache (IBKR — server-side reqMatchingSymbols).
+  const CATALOG_REFRESH_MS = 6 * 60 * 60 * 1000  // 6h
+  const catalogRefreshTimer = setInterval(() => {
+    for (const uta of utaManager.resolve()) {
+      uta.refreshCatalog().catch((err) => {
+        console.warn(`[catalog-refresh] ${uta.id} failed:`, err instanceof Error ? err.message : err)
+      })
+    }
+  }, CATALOG_REFRESH_MS)
+  // Don't keep the process alive just for the refresh loop — shutdown logic
+  // below clears it anyway, this is belt-and-braces for clean Node exit.
+  catalogRefreshTimer.unref?.()
+
   // ==================== Shutdown ====================
 
   let stopped = false
   const shutdown = async () => {
     stopped = true
+    clearInterval(catalogRefreshTimer)
     newsCollector?.stop()
     snapshotScheduler.stop()
     heartbeat.stop()
     metricsListener.stop()
     cronListener.stop()
     cronEngine.stop()
+    connectorCenter.stop()
     await listenerRegistry.stop()
     for (const plugin of [...corePlugins, ...optionalPlugins.values()]) {
       await plugin.stop()
@@ -461,7 +491,7 @@ async function main() {
     await newsStore.close()
     await toolCallLog.close()
     await eventLog.close()
-    await accountManager.closeAll()
+    await utaManager.closeAll()
     process.exit(0)
   }
   process.on('SIGINT', shutdown)

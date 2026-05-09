@@ -2,16 +2,16 @@
  * D. End-to-End Flow Tests
  *
  * Verifies complete message paths: user chat (AgentCenter → session + stream),
- * notification (AgentCenter → ConnectorCenter → connector.send),
- * streaming notification, and media end-to-end flow.
+ * notification (AgentCenter → ConnectorCenter.notify → notificationsStore),
+ * and media end-to-end flow.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ConnectorCenter } from '../../connector-center.js'
+import { createMemoryNotificationsStore } from '../../notifications-store.js'
 import type { SessionEntry } from '../../session.js'
 import {
   FakeProvider,
   MemorySessionStore,
-  MockConnector,
   makeAgentCenter,
   collectEvents,
   textEvent,
@@ -90,7 +90,7 @@ describe('End-to-end flows', () => {
     expect(finalAssistant.provider).toBe('vercel-ai')
   })
 
-  it('D2: notification path — agent result delivered via connector.send', async () => {
+  it('D2: notification path — agent result lands in notificationsStore', async () => {
     const provider = new FakeProvider([
       textEvent('market alert: AAPL up 5%'),
       doneEvent('market alert: AAPL up 5%'),
@@ -100,49 +100,25 @@ describe('End-to-end flows', () => {
 
     const result = await ac.askWithSession('check market', heartbeatSession)
 
-    const cc = new ConnectorCenter()
-    const webConnector = new MockConnector({ channel: 'web' })
-    cc.register(webConnector)
+    const notificationsStore = createMemoryNotificationsStore()
+    const cc = new ConnectorCenter({ notificationsStore })
 
-    await cc.notify(result.text, { media: result.media, source: 'heartbeat' })
+    const entry = await cc.notify(result.text, { media: result.media, source: 'heartbeat' })
 
-    expect(webConnector.calls).toHaveLength(1)
-    expect(webConnector.calls[0].payload!.text).toBe('market alert: AAPL up 5%')
-    expect(webConnector.calls[0].payload!.kind).toBe('notification')
-    expect(webConnector.calls[0].payload!.source).toBe('heartbeat')
+    expect(entry.text).toBe('market alert: AAPL up 5%')
+    expect(entry.source).toBe('heartbeat')
+    expect(entry.id).toBeDefined()
+
+    const { entries } = await notificationsStore.read()
+    expect(entries).toHaveLength(1)
+    expect(entries[0].text).toBe('market alert: AAPL up 5%')
 
     const all = await heartbeatSession.readAll()
     const hbAssistants = assistantEntries(all)
     expect(hbAssistants.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('D3: streaming notification path — askWithSession result streamed via connector.sendStream', async () => {
-    const provider = new FakeProvider([
-      textEvent('streaming notification'),
-      doneEvent('streaming notification'),
-    ])
-    const ac = makeAgentCenter(provider)
-    const cronSession = new MemorySessionStore()
-
-    const stream = ac.askWithSession('run cron task', cronSession)
-
-    const cc = new ConnectorCenter()
-    const webConnector = new MockConnector({ channel: 'web' })
-    cc.register(webConnector)
-
-    await cc.notifyStream(stream, { source: 'cron' })
-
-    expect(webConnector.calls).toHaveLength(1)
-    expect(webConnector.calls[0].method).toBe('sendStream')
-    expect(webConnector.calls[0].meta).toEqual({ kind: 'notification', source: 'cron' })
-
-    const all = await cronSession.readAll()
-    const cronAssistants = assistantEntries(all)
-    const finalAssistant = cronAssistants[cronAssistants.length - 1]
-    expect(finalAssistant.message.content).toEqual([{ type: 'text', text: 'streaming notification' }])
-  })
-
-  it('D4: media flows end-to-end from provider through AgentCenter to connector', async () => {
+  it('D4: media flows end-to-end from provider through AgentCenter into the notifications store', async () => {
     const provider = new FakeProvider([
       textEvent('chart ready'),
       doneEvent('chart ready', [{ type: 'image', path: '/tmp/chart.png' }]),
@@ -162,14 +138,12 @@ describe('End-to-end flows', () => {
 
     expect(result.mediaUrls).toEqual(['/api/media/2026-03-13/ace-aim-air.png'])
 
-    const cc = new ConnectorCenter()
-    const connector = new MockConnector({ channel: 'web' })
-    cc.register(connector)
+    const notificationsStore = createMemoryNotificationsStore()
+    const cc = new ConnectorCenter({ notificationsStore })
 
-    await cc.notify(result.text, { media: result.media, source: 'heartbeat' })
+    const entry = await cc.notify(result.text, { media: result.media, source: 'heartbeat' })
 
-    const payload = connector.calls[0].payload!
-    expect(payload.text).toBe('chart ready')
-    expect(payload.media).toEqual([{ type: 'image', path: '/tmp/chart.png' }])
+    expect(entry.text).toBe('chart ready')
+    expect(entry.media).toEqual([{ type: 'image', path: '/tmp/chart.png' }])
   })
 })

@@ -12,12 +12,12 @@ import { SessionStore } from '../../core/session'
 import { forceCompact } from '../../core/compaction'
 import { readAIProviderConfig, setActiveProfile, readConnectorsConfig } from '../../core/config'
 import type { ConnectorCenter } from '../../core/connector-center.js'
-import type { ProducerHandle } from '../../core/producer.js'
 import { TelegramConnector, splitMessage, MAX_MESSAGE_LENGTH } from './telegram-connector.js'
-import type { AccountManager } from '../../domain/trading/index.js'
+import type { UTAManager } from '../../domain/trading/index.js'
 import type { Operation } from '../../domain/trading/git/types.js'
 import { getOperationSymbol } from '../../domain/trading/git/types.js'
 import { UNSET_DECIMAL } from '@traderalice/ibkr'
+import Decimal from 'decimal.js'
 
 /** Build a display label for a profile. */
 function profileLabel(name: string, profile: { model: string }): string {
@@ -32,7 +32,7 @@ export class TelegramPlugin implements Plugin {
   private connectorCenter: ConnectorCenter | null = null
   private merger: MediaGroupMerger | null = null
   private unregisterConnector?: () => void
-  private producer: ProducerHandle<readonly ['message.received', 'message.sent']> | null = null
+  private unsubscribeNotifications?: () => void
 
   /** Per-user unified session stores (keyed by userId). */
   private sessions = new Map<number, SessionStore>()
@@ -52,10 +52,6 @@ export class TelegramPlugin implements Plugin {
   async start(engineCtx: EngineContext) {
     this.connectorCenter = engineCtx.connectorCenter
     this.webPort = engineCtx.config.connectors.web.port
-    this.producer = engineCtx.listenerRegistry.declareProducer({
-      name: 'telegram-connector',
-      emits: ['message.received', 'message.sent'] as const,
-    })
 
     // Inject agent config into Claude Code config (used by /compact command)
     this.agentSdkConfig = {
@@ -115,7 +111,21 @@ export class TelegramPlugin implements Plugin {
     })
 
     bot.command('trading', async (ctx) => {
-      await this.handleTradingCommand(ctx.chat.id, engineCtx.accountManager)
+      await this.handleTradingCommand(ctx.chat.id, engineCtx.utaManager)
+    })
+
+    bot.command('notifications', async (ctx) => {
+      const { entries } = await engineCtx.notificationsStore.read({ limit: 10 })
+      if (entries.length === 0) {
+        await this.sendReply(ctx.chat.id, 'No notifications yet.')
+        return
+      }
+      const formatted = entries.map((e) => {
+        const when = new Date(e.ts).toLocaleString()
+        const tag = e.source ? `[${e.source}]` : ''
+        return `${when} ${tag}\n${e.text}`
+      }).join('\n\n— — —\n\n')
+      await this.sendReply(ctx.chat.id, `Recent notifications (${entries.length}):\n\n${formatted}`)
     })
 
     // ── Callback queries (inline keyboard presses) ──
@@ -147,21 +157,21 @@ export class TelegramPlugin implements Plugin {
 
           if (action === 'back') {
             // Return to overview
-            const { text, keyboard } = await this.buildTradingOverview(engineCtx.accountManager)
+            const { text, keyboard } = await this.buildTradingOverview(engineCtx.utaManager)
             await ctx.answerCallbackQuery()
             await ctx.editMessageText(text, { reply_markup: keyboard }).catch(() => {})
           } else if (action === 'view') {
-            const { text, keyboard } = await this.buildAccountPanel(engineCtx.accountManager, accountId)
+            const { text, keyboard } = await this.buildAccountPanel(engineCtx.utaManager, accountId)
             await ctx.answerCallbackQuery()
             await ctx.editMessageText(text, { reply_markup: keyboard }).catch(() => {})
           } else if (action === 'push' || action === 'reject') {
-            const uta = engineCtx.accountManager.get(accountId)
+            const uta = engineCtx.utaManager.get(accountId)
             if (!uta) { await ctx.answerCallbackQuery({ text: 'Account not found' }); return }
             const status = uta.status()
             if (!status.pendingMessage) {
               await ctx.answerCallbackQuery({ text: 'No pending commit' })
               // Refresh panel
-              const { text, keyboard } = await this.buildAccountPanel(engineCtx.accountManager, accountId)
+              const { text, keyboard } = await this.buildAccountPanel(engineCtx.utaManager, accountId)
               await ctx.editMessageText(text, { reply_markup: keyboard }).catch(() => {})
               return
             }
@@ -173,7 +183,7 @@ export class TelegramPlugin implements Plugin {
               await ctx.answerCallbackQuery({ text: 'Rejected' })
             }
             // Refresh panel after action
-            const { text, keyboard } = await this.buildAccountPanel(engineCtx.accountManager, accountId)
+            const { text, keyboard } = await this.buildAccountPanel(engineCtx.utaManager, accountId)
             await ctx.editMessageText(text, { reply_markup: keyboard }).catch(() => {})
           }
         } else if (data.startsWith('heartbeat:')) {
@@ -222,6 +232,7 @@ export class TelegramPlugin implements Plugin {
       { command: 'heartbeat', description: 'Toggle heartbeat self-check' },
       { command: 'compact', description: 'Force compact session context' },
       { command: 'trading', description: 'Trading status and pending commits' },
+      { command: 'notifications', description: 'Show recent system notifications' },
     ])
 
     // ── Initialize and get bot info ──
@@ -232,7 +243,20 @@ export class TelegramPlugin implements Plugin {
     // ── Register connector for outbound delivery (heartbeat / cron responses) ──
     if (this.config.allowedChatIds.length > 0) {
       const deliveryChatId = this.config.allowedChatIds[0]
-      this.unregisterConnector = this.connectorCenter!.register(new TelegramConnector(bot, deliveryChatId))
+      const telegramConnector = new TelegramConnector(bot, deliveryChatId)
+      this.unregisterConnector = this.connectorCenter!.register(telegramConnector)
+
+      // Subscribe to notifications store. Telegram surfaces system pushes
+      // by inlining them into the chat thread — but only when the user
+      // is actively using Telegram (last-interacted channel is 'telegram').
+      // Otherwise we don't ping; the user can pull via /notifications.
+      this.unsubscribeNotifications = engineCtx.notificationsStore.onAppended((entry) => {
+        const last = engineCtx.connectorCenter.getLastInteraction()
+        if (last?.channel !== 'telegram') return
+        telegramConnector
+          .send({ kind: 'notification', text: entry.text, media: entry.media, source: entry.source })
+          .catch((err) => console.warn('telegram: notification surface failed:', err))
+      })
     }
 
     // ── Start polling ──
@@ -248,9 +272,9 @@ export class TelegramPlugin implements Plugin {
   async stop() {
     this.merger?.flush()
     await this.bot?.stop()
+    this.unsubscribeNotifications?.()
+    this.unsubscribeNotifications = undefined
     this.unregisterConnector?.()
-    this.producer?.dispose()
-    this.producer = null
   }
 
   private async getSession(userId: number): Promise<SessionStore> {
@@ -284,7 +308,7 @@ export class TelegramPlugin implements Plugin {
       if (!prompt) return
 
       // Log: message received
-      const receivedEntry = await this.producer!.emit('message.received', {
+      const receivedEntry = await engineCtx.connectorCenter.emitMessageReceived({
         channel: 'telegram',
         to: String(message.chatId),
         prompt,
@@ -304,7 +328,7 @@ export class TelegramPlugin implements Plugin {
         await this.sendReplyWithPlaceholder(message.chatId, result.text, result.media, placeholder?.message_id)
 
         // Log: message sent
-        await this.producer!.emit('message.sent', {
+        await engineCtx.connectorCenter.emitMessageSent({
           channel: 'telegram',
           to: String(message.chatId),
           prompt,
@@ -455,8 +479,8 @@ export class TelegramPlugin implements Plugin {
 
   // ── Trading command ──
 
-  private async handleTradingCommand(chatId: number, accountManager: AccountManager) {
-    const accounts = accountManager.resolve()
+  private async handleTradingCommand(chatId: number, utaManager: UTAManager) {
+    const accounts = utaManager.resolve()
     if (accounts.length === 0) {
       await this.sendReply(chatId, 'No trading accounts configured.')
       return
@@ -464,18 +488,18 @@ export class TelegramPlugin implements Plugin {
 
     // Single account — skip overview, show panel directly
     if (accounts.length === 1) {
-      const { text, keyboard } = await this.buildAccountPanel(accountManager, accounts[0].id)
+      const { text, keyboard } = await this.buildAccountPanel(utaManager, accounts[0].id)
       await this.bot!.api.sendMessage(chatId, text, { reply_markup: keyboard })
       return
     }
 
     // Multiple accounts — show overview with account selector
-    const { text, keyboard } = await this.buildTradingOverview(accountManager)
+    const { text, keyboard } = await this.buildTradingOverview(utaManager)
     await this.bot!.api.sendMessage(chatId, text, { reply_markup: keyboard })
   }
 
-  private async buildTradingOverview(accountManager: AccountManager): Promise<{ text: string; keyboard: InlineKeyboard }> {
-    const accounts = accountManager.resolve()
+  private async buildTradingOverview(utaManager: UTAManager): Promise<{ text: string; keyboard: InlineKeyboard }> {
+    const accounts = utaManager.resolve()
     const lines: string[] = ['Trading Panel', '']
     const keyboard = new InlineKeyboard()
 
@@ -495,8 +519,8 @@ export class TelegramPlugin implements Plugin {
     return { text: lines.join('\n'), keyboard }
   }
 
-  private async buildAccountPanel(accountManager: AccountManager, accountId: string): Promise<{ text: string; keyboard: InlineKeyboard }> {
-    const uta = accountManager.get(accountId)
+  private async buildAccountPanel(utaManager: UTAManager, accountId: string): Promise<{ text: string; keyboard: InlineKeyboard }> {
+    const uta = utaManager.get(accountId)
     if (!uta) return { text: 'Account not found.', keyboard: new InlineKeyboard() }
 
     const healthIcon = uta.health === 'healthy' ? '🟢' : uta.health === 'degraded' ? '🟡' : '🔴'
@@ -545,7 +569,7 @@ export class TelegramPlugin implements Plugin {
     }
 
     // Back button only if multiple accounts
-    if (accountManager.size > 1) {
+    if (utaManager.size > 1) {
       keyboard.text('← Back', 'trading:back:')
     }
 
@@ -572,6 +596,11 @@ export class TelegramPlugin implements Plugin {
         return `CANCEL order ${op.orderId}`
       case 'syncOrders':
         return 'SYNC orders'
+      case 'reconcileBalance': {
+        const delta = new Decimal(op.quantityDelta)
+        const dir = delta.gte(0) ? 'OBSERVED' : 'RELEASED'
+        return `${dir} ${symbol} ${delta.abs().toFixed()} @${op.markPrice}`
+      }
     }
   }
 

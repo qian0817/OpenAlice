@@ -16,6 +16,7 @@ import {
 } from './heartbeat.js'
 import { SessionStore } from '../../core/session.js'
 import { ConnectorCenter } from '../../core/connector-center.js'
+import { createMemoryNotificationsStore } from '../../core/notifications-store.js'
 
 // Mock writeConfigSection to avoid disk writes in tests
 vi.mock('../../core/config.js', () => ({
@@ -61,6 +62,7 @@ describe('heartbeat', () => {
   let mockEngine: ReturnType<typeof createMockEngine>
   let session: SessionStore
   let connectorCenter: ConnectorCenter
+  let notificationsStore: ReturnType<typeof createMemoryNotificationsStore>
 
   beforeEach(async () => {
     const logPath = tempPath('jsonl')
@@ -73,7 +75,8 @@ describe('heartbeat', () => {
 
     mockEngine = createMockEngine()
     session = new SessionStore(`test/heartbeat-${randomUUID()}`)
-    connectorCenter = new ConnectorCenter()
+    notificationsStore = createMemoryNotificationsStore()
+    connectorCenter = new ConnectorCenter({ notificationsStore })
   })
 
   afterEach(async () => {
@@ -150,11 +153,7 @@ describe('heartbeat', () => {
   describe('event handling', () => {
     it('should call AI and write heartbeat.done on real response', async () => {
       const delivered: string[] = []
-      connectorCenter.register({
-        channel: 'test', to: 'user1',
-        capabilities: { push: true, media: false },
-        send: async (payload) => { delivered.push(payload.text); return { delivered: true } },
-      })
+      notificationsStore.onAppended((entry) => { delivered.push(entry.text) })
 
       heartbeat = createHeartbeat({
         config: makeConfig(),
@@ -209,11 +208,7 @@ describe('heartbeat', () => {
 
     it('should deliver unparsed responses (fail-open)', async () => {
       const delivered: string[] = []
-      connectorCenter.register({
-        channel: 'test', to: 'user1',
-        capabilities: { push: true, media: false },
-        send: async (payload) => { delivered.push(payload.text); return { delivered: true } },
-      })
+      notificationsStore.onAppended((entry) => { delivered.push(entry.text) })
 
       // Raw text without structured format
       mockEngine.setResponse('BTC just crashed 15%, major liquidation event!')
@@ -295,11 +290,7 @@ describe('heartbeat', () => {
   describe('dedup', () => {
     it('should suppress duplicate messages within 24h', async () => {
       const delivered: string[] = []
-      connectorCenter.register({
-        channel: 'test', to: 'user1',
-        capabilities: { push: true, media: false },
-        send: async (payload) => { delivered.push(payload.text); return { delivered: true } },
-      })
+      notificationsStore.onAppended((entry) => { delivered.push(entry.text) })
 
       heartbeat = createHeartbeat({
         config: makeConfig(),
@@ -355,12 +346,12 @@ describe('heartbeat', () => {
       expect(errors[0].payload).toMatchObject({ error: 'AI down' })
     })
 
-    it('should handle delivery failure gracefully', async () => {
-      connectorCenter.register({
-        channel: 'test', to: 'user1',
-        capabilities: { push: true, media: false },
-        send: async () => { throw new Error('send failed') },
-      })
+    it('should handle notify failure gracefully', async () => {
+      // Force the underlying append to reject so the heartbeat sees a
+      // failed notify path. Heartbeat must still emit heartbeat.done
+      // (with delivered=false) and not crash.
+      const originalAppend = notificationsStore.append.bind(notificationsStore)
+      notificationsStore.append = async () => { throw new Error('store failed') }
 
       heartbeat = createHeartbeat({
         config: makeConfig(),
@@ -379,6 +370,8 @@ describe('heartbeat', () => {
 
       const done = eventLog.recent({ type: 'heartbeat.done' })
       expect((done[0].payload as any).delivered).toBe(false)
+
+      notificationsStore.append = originalAppend
     })
   })
 
@@ -457,11 +450,7 @@ describe('heartbeat', () => {
 
     it('should allow firing after setEnabled(true)', async () => {
       const delivered: string[] = []
-      connectorCenter.register({
-        channel: 'test', to: 'user1',
-        capabilities: { push: true, media: false },
-        send: async (payload) => { delivered.push(payload.text); return { delivered: true } },
-      })
+      notificationsStore.onAppended((entry) => { delivered.push(entry.text) })
 
       heartbeat = createHeartbeat({
         config: makeConfig({ enabled: false }),

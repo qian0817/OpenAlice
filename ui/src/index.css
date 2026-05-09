@@ -82,6 +82,17 @@ body,
   border-radius: 3px;
 }
 
+/* Hide scrollbar utility — content still scrolls (programmatically or via
+   wheel/trackpad), the bar itself just doesn't render. Used on the tab
+   strip so a long row of tabs doesn't reserve a thick horizontal track. */
+.scrollbar-hide {
+  scrollbar-width: none;       /* Firefox */
+  -ms-overflow-style: none;    /* IE / old Edge */
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;               /* Chromium / WebKit */
+}
+
 /* Markdown content inside assistant messages */
 .markdown-content p {
   margin: 0.5em 0;
