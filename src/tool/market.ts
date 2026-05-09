@@ -25,7 +25,7 @@ come from Yahoo Finance fuzzy search; commodity results come from a canonical ca
 Currency results are filtered to XXXUSD pairs only.
 For commodities, use the canonical id (e.g. "gold", "crude_oil", "copper") with calculateIndicator
 and other tools — provider-specific tickers (GC=F, GCUSD) are resolved automatically.
-${chinaSymbolIndex ? 'China A-share stocks (Shanghai/Shenzhen) are also included in equity results (source: akshare).' : ''}
+${deps.chinaSymbolIndex ? 'China A-share stocks (Shanghai/Shenzhen) are also included in equity results (source: akshare).' : ''}
 If unsure about the symbol, use this to find the correct one for market data tools
 (equityGetProfile, equityGetFinancials, calculateIndicator, chinaEquityGetHistory, etc.).
 This is NOT for trading — use searchContracts to find broker-tradeable contracts.`,

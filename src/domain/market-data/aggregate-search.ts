@@ -13,14 +13,16 @@
 import type { SymbolIndex } from './equity/symbol-index.js'
 import type { CommodityCatalog } from './commodity/commodity-catalog.js'
 import type { CryptoClientLike, CurrencyClientLike } from './client/types.js'
+import {ChinaSymbolIndex} from "@/domain/market-data/china";
 
-export type AssetClass = 'equity' | 'crypto' | 'currency' | 'commodity'
+export type AssetClass = 'equity' | 'crypto' | 'currency' | 'commodity' | 'china-equity'
 
 export interface MarketSearchDeps {
   symbolIndex: SymbolIndex
   cryptoClient: CryptoClientLike
   currencyClient: CurrencyClientLike
   commodityCatalog: CommodityCatalog
+  chinaSymbolIndex: ChinaSymbolIndex | undefined
 }
 
 export interface MarketSearchResult {
@@ -93,11 +95,16 @@ export async function aggregateSymbolSearch(
     })
     .map((r) => ({ ...r, assetClass: 'currency' as const }))
 
+  const chinaSymbolResults = (deps.chinaSymbolIndex == undefined ?
+          [] : deps.chinaSymbolIndex.search(q, limit).map(r => ({...r, assetClass: 'china-equity' as const}))
+  )
+
   const all: MarketSearchResult[] = [
     ...equityResults,
     ...cryptoResults,
     ...currencyResults,
     ...commodityResults,
+    ...chinaSymbolResults
   ]
 
   // Stable sort by match quality descending; ties keep upstream order.
